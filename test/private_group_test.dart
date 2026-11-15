@@ -19,24 +19,32 @@ final privateInvitation = GroupInvitation.fromMap({
 });
 
 void main() {
-  testWidgets('private host defaults to NFC only and never displays QR', (
+  testWidgets('private host creates advertised private group without NFC or QR', (
     tester,
   ) async {
     final connection = NfcConnection();
     addTearDown(connection.updates.close);
     await tester.pumpWidget(MessengerApp(connectivity: connection));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Create or join a group'));
+    await tester.tap(find.text('Create a group'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.text('Create a group'),
+      find.text('Private'),
       150,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.tap(find.text('Create a group'));
+    await tester.tap(find.text('Private'));
+    await tester.scrollUntilVisible(
+      find.widgetWithText(FilledButton, 'Create a group'),
+      150,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create a group'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create a group'));
     await tester.pumpAndSettle();
     expect(connection.createdPrivate, isTrue);
-    expect(connection.createdToken, matches(RegExp(r'^[0-9a-f]{64}$')));
+    expect(connection.createdToken, isNull);
     connection.updates.add(
       const GroupConnectionState(
         status: GroupStatus.connected,
@@ -48,13 +56,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Show group QR code'), findsNothing);
-    await tester.scrollUntilVisible(
-      find.text('Share via NFC'),
-      -150,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.text('Share via NFC'), findsOneWidget);
-    expect(find.text('Private group · NFC invitations only'), findsOneWidget);
+    expect(find.text('Share via NFC'), findsNothing);
+    expect(find.text('Private group · Known contacts only'), findsOneWidget);
   });
 
   testWidgets('public creation has no admission secret', (tester) async {
@@ -62,7 +65,7 @@ void main() {
     addTearDown(connection.updates.close);
     await tester.pumpWidget(MessengerApp(connectivity: connection));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Create or join a group'));
+    await tester.tap(find.text('Create a group'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Public'),
@@ -71,11 +74,13 @@ void main() {
     );
     await tester.tap(find.text('Public'));
     await tester.scrollUntilVisible(
-      find.text('Create a group'),
+      find.widgetWithText(FilledButton, 'Create a group'),
       150,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.tap(find.text('Create a group'));
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create a group'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create a group'));
     await tester.pumpAndSettle();
     expect(connection.createdPrivate, isFalse);
     expect(connection.createdToken, isNull);

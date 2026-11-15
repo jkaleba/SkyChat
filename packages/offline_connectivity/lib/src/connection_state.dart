@@ -12,20 +12,28 @@ class NearbyPeer {
     required this.id,
     required this.name,
     required this.isGroupOwner,
+    this.privateGroup = false,
+    this.hostContactId,
   });
   final String id;
   final String name;
   final bool isGroupOwner;
+  final bool privateGroup;
+  final String? hostContactId;
   factory NearbyPeer.fromMap(Map<String, dynamic> map) {
     if (map['id'] is! String ||
         map['name'] is! String ||
-        map['isGroupOwner'] is! bool) {
+        map['isGroupOwner'] is! bool ||
+        (map['privateGroup'] != null && map['privateGroup'] is! bool) ||
+        (map['hostContactId'] != null && map['hostContactId'] is! String)) {
       throw const FormatException('Invalid peer.');
     }
     return NearbyPeer(
       id: map['id'] as String,
       name: map['name'] as String,
       isGroupOwner: map['isGroupOwner'] as bool,
+      privateGroup: map['privateGroup'] == true,
+      hostContactId: map['hostContactId'] as String?,
     );
   }
 }

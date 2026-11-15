@@ -168,7 +168,7 @@ void main() {
       expect(background.notifications.single.text, 'Hello there');
 
       // Peer message while viewing ChatScreen in foreground does not notify.
-      await tester.tap(find.text('Open chat / connection status'));
+      await tester.tap(find.text('Current public group'));
       await tester.pumpAndSettle();
       transport.fakeIncoming.add(
         ChatMessage(

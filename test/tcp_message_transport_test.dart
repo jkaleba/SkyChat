@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:offline_group_messenger/core/contacts/contact_repository.dart';
 import 'package:offline_group_messenger/core/messaging/tcp_message_transport.dart';
 
 Future<void> until(bool Function() condition) async {
@@ -193,4 +194,107 @@ void main() {
       expect(alice.participants, isEmpty);
     },
   );
+
+  test(
+    'propagates immutable contactId on participants and chat messages',
+    () async {
+      final hostRepo = _FakeContactRepo('host-contact-id');
+      final aliceRepo = _FakeContactRepo('alice-contact-id');
+      final customHost = TcpMessageTransport(contacts: hostRepo)
+        ..displayName = 'Host';
+      final customAlice = TcpMessageTransport(contacts: aliceRepo)
+        ..displayName = 'Alice';
+      addTearDown(() {
+        customAlice.dispose();
+        customHost.dispose();
+      });
+
+      await customHost.startHost(port: 0, address: '127.0.0.1');
+      await customAlice.connect(
+        host: '127.0.0.1',
+        port: customHost.listeningPort!,
+      );
+      await until(
+        () =>
+            customHost.participants.length == 2 &&
+            customAlice.participants.length == 2,
+      );
+
+      final aliceOnHost = customHost.participants.firstWhere(
+        (p) => p.displayName == 'Alice',
+      );
+      expect(aliceOnHost.contactId, 'alice-contact-id');
+      final hostOnAlice = customAlice.participants.firstWhere(
+        (p) => p.displayName == 'Host',
+      );
+      expect(hostOnAlice.contactId, 'host-contact-id');
+
+      final hostReceived = customHost.incoming.firstWhere(
+        (m) => m.senderId == customAlice.selfId,
+      );
+      final msg = customAlice.createMessage('Hi from Alice');
+      await customAlice.send(msg);
+      final received = await hostReceived;
+      expect(received.senderName, 'Alice');
+      expect(received.senderContactId, 'alice-contact-id');
+    },
+  );
+
+  test(
+    'rejoining with the same contactId replaces prior participant and updates username',
+    () async {
+      final hostRepo = _FakeContactRepo('host-contact-id');
+      final aliceRepo = _FakeContactRepo('alice-contact-id');
+      final customHost = TcpMessageTransport(contacts: hostRepo)
+        ..displayName = 'Host';
+      final firstAlice = TcpMessageTransport(contacts: aliceRepo)
+        ..displayName = 'SM-A217F';
+      final secondAlice = TcpMessageTransport(contacts: aliceRepo)
+        ..displayName = 'Alice';
+      addTearDown(() {
+        firstAlice.dispose();
+        secondAlice.dispose();
+        customHost.dispose();
+      });
+
+      await customHost.startHost(port: 0, address: '127.0.0.1');
+      await firstAlice.connect(
+        host: '127.0.0.1',
+        port: customHost.listeningPort!,
+      );
+      await until(() => customHost.participants.length == 2);
+      expect(
+        customHost.participants.map((p) => p.displayName).toList(),
+        ['Host', 'SM-A217F'],
+      );
+
+      await secondAlice.connect(
+        host: '127.0.0.1',
+        port: customHost.listeningPort!,
+      );
+      await until(() => secondAlice.status == ChatStatus.ready);
+      await until(
+        () => customHost.participants.any((p) => p.displayName == 'Alice'),
+      );
+
+      expect(customHost.participants.length, 2);
+      expect(customHost.members.length, 2);
+      expect(
+        customHost.participants.map((p) => p.displayName).toList(),
+        ['Host', 'Alice'],
+      );
+      expect(
+        secondAlice.participants.map((p) => p.displayName).toList(),
+        ['Host', 'Alice'],
+      );
+    },
+  );
+}
+
+class _FakeContactRepo extends ContactRepository {
+  const _FakeContactRepo(this.selfId);
+  final String selfId;
+
+  @override
+  Future<ContactSnapshot> load() async => ContactSnapshot(selfId, const []);
 }

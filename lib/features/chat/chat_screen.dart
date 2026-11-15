@@ -1,19 +1,27 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../core/contacts/contact_repository.dart';
 import '../../core/messaging/tcp_message_transport.dart';
 import '../../core/messaging/chat_session_controller.dart';
+import '../../core/models/chat_message.dart';
+import '../../core/models/participant.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
     super.key,
     required this.chat,
+    this.contacts = const ContactRepository(),
     this.removePrivateMember,
     this.openContacts,
     this.openCall,
   });
   final ChatSessionController chat;
+  final ContactRepository contacts;
   final Future<void> Function(String id)? removePrivateMember;
-  final VoidCallback? openContacts;
+  final FutureOr<void> Function()? openContacts;
   final VoidCallback? openCall;
 
   @override
@@ -22,12 +30,60 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   late final TextEditingController _text;
+  Map<String, String> _contactNames = {};
+  bool _contactsLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _text = TextEditingController(text: widget.chat.draft);
     widget.chat.addListener(_syncDraft);
+    unawaited(_loadContacts());
+  }
+
+  Future<void> _loadContacts() async {
+    try {
+      final snapshot = await widget.contacts.load();
+      if (!mounted) return;
+      setState(() {
+        _contactNames = {
+          for (final c in snapshot.contacts)
+            if (c.trust == ContactTrust.verified) c.id: c.name,
+        };
+        _contactsLoaded = true;
+      });
+    } on MissingPluginException {
+      // Ignored in tests without contacts channel.
+    } on PlatformException {
+      // Best-effort.
+    }
+  }
+
+  String _senderLabel(ChatMessage message) {
+    if (message.senderId == widget.chat.selfId) return 'You';
+    if (message.senderId.isEmpty) return message.senderName;
+    final contactId =
+        message.senderContactId ??
+        widget.chat.members
+            .where((p) => p.id == message.senderId)
+            .map((p) => p.contactId)
+            .firstOrNull;
+    return resolveSenderLabel(
+      senderName: message.senderName,
+      senderContactId: contactId,
+      contactNames: _contactNames,
+      contactsLoaded: _contactsLoaded,
+    );
+  }
+
+  String _participantLabel(Participant participant) {
+    if (participant.id == widget.chat.selfId) return participant.displayName;
+    return resolveSenderLabel(
+      senderName: participant.displayName,
+      senderContactId: participant.contactId,
+      contactNames: _contactNames,
+      contactsLoaded: _contactsLoaded,
+    );
   }
 
   void _syncDraft() {
@@ -144,8 +200,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   ListTile(
                     title: Text(
                       p.id == delivery.hostId
-                          ? '${p.displayName} (host)'
-                          : p.displayName,
+                          ? '${_participantLabel(p)} (host)'
+                          : _participantLabel(p),
                     ),
                     subtitle: Text(
                       delivery.received.contains(p.id)
@@ -214,7 +270,10 @@ class _ChatScreenState extends State<ChatScreen> {
             if (widget.openContacts != null)
               IconButton(
                 tooltip: 'Contacts and calls',
-                onPressed: widget.openContacts,
+                onPressed: () async {
+                  await widget.openContacts!();
+                  if (mounted) await _loadContacts();
+                },
                 icon: const Icon(Icons.contacts),
               ),
             if (widget.openCall != null)
@@ -236,7 +295,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         const ListTile(title: Text('Participants')),
                         for (final p in chat.members)
                           ListTile(
-                            title: Text(p.displayName),
+                            title: Text(_participantLabel(p)),
                             subtitle: Text(
                               p.id == chat.selfId
                                   ? 'You'
@@ -348,7 +407,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        mine ? 'You' : message.senderName,
+                                        _senderLabel(message),
                                         style: Theme.of(
                                           context,
                                         ).textTheme.labelMedium,

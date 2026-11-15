@@ -19,6 +19,9 @@ internal class PublicGroupDiscovery(
     private var service: WifiP2pDnsSdServiceInfo? = null
     private var request: WifiP2pDnsSdServiceRequest? = null
     private var advertised = false
+    private var advertisedPrivate = false
+    private var advertisedContactId: String? = null
+    private var advertisedHostName: String? = null
     private var advertisementRevision = 0
     private var scanRevision = 0
     private var scanning = false
@@ -30,28 +33,53 @@ internal class PublicGroupDiscovery(
         channel = value
         manager.setDnsSdResponseListeners(value, { _, _, _ -> }, { domain, record, device ->
             if (channel === value && scanning && PublicGroupRecord.accepts(domain, record)) {
-                Log.d("OfflineDiscovery", "Public TXT response accepted")
-                peers[device.deviceAddress] = Pair(mapOf(
-                    "id" to device.deviceAddress,
-                    "name" to (device.deviceName?.takeIf { it.isNotBlank() } ?: "Public group"),
-                    "isGroupOwner" to true
-                ), SystemClock.elapsedRealtime())
+                val isPrivate = record["mode"] == "private"
+                val hostContactId = record["cid"]?.takeIf { it.isNotBlank() }
+                val advertisedName = record["name"]?.trim()?.takeIf { it.isNotEmpty() }
+                Log.d("OfflineDiscovery", "TXT response accepted private=$isPrivate")
+                peers[device.deviceAddress] = Pair(buildMap {
+                    put("id", device.deviceAddress)
+                    put(
+                        "name",
+                        advertisedName
+                            ?: device.deviceName?.takeIf { it.isNotBlank() }
+                            ?: if (isPrivate) "Private group" else "Public group"
+                    )
+                    put("isGroupOwner", true)
+                    put("privateGroup", isPrivate)
+                    if (hostContactId != null) put("hostContactId", hostContactId)
+                }, SystemClock.elapsedRealtime())
                 publishPeers()
             }
         })
     }
 
-    fun advertise(enabled: Boolean) {
+    fun advertise(
+        enabled: Boolean,
+        privateGroup: Boolean = false,
+        hostContactId: String? = null,
+        hostName: String? = null
+    ) {
         val ch = channel ?: return
-        if (enabled == advertised) return
+        if (enabled == advertised &&
+            (!enabled || (privateGroup == advertisedPrivate && hostContactId == advertisedContactId && hostName == advertisedHostName))) {
+            return
+        }
         advertised = enabled
+        advertisedPrivate = privateGroup
+        advertisedContactId = hostContactId
+        advertisedHostName = hostName
         val revision = ++advertisementRevision
         service?.let { try { manager.removeLocalService(ch, it, null) } catch (_: RuntimeException) {} }
         service = null
         if (!enabled) return
         val info = WifiP2pDnsSdServiceInfo.newInstance(
             PublicGroupRecord.INSTANCE, PublicGroupRecord.TYPE,
-            PublicGroupRecord.fields() + ("advertisement" to revision.toString())
+            PublicGroupRecord.fields(
+                privateGroup = privateGroup,
+                hostContactId = hostContactId,
+                hostName = hostName
+            ) + ("advertisement" to revision.toString())
         )
         service = info
         try {
@@ -103,11 +131,18 @@ internal class PublicGroupDiscovery(
                 else WifiP2pDnsSdServiceRequest.newInstance()
             request = req
             Log.d("OfflineDiscovery", "Search cycle $cycle (${if (cycle == 1) "TXT" else "all DNS-SD"})")
-            fun failed(reason: Int) {
-                if (current()) { lastError = reason; Log.d("OfflineDiscovery", "Search operation failed: $reason") }
-            }
+            var busyRetries = 0
             fun configure() {
                 if (!current()) return
+                fun failed(reason: Int) {
+                    if (!current()) return
+                    lastError = reason
+                    Log.d("OfflineDiscovery", "Search operation failed: $reason")
+                    if (reason == WifiP2pManager.BUSY && busyRetries < 4) {
+                        busyRetries++
+                        handler.postDelayed({ configure() }, 400L * busyRetries)
+                    }
+                }
                 try { manager.clearServiceRequests(ch, object : WifiP2pManager.ActionListener {
                     override fun onSuccess() {
                         if (!current()) return
@@ -133,7 +168,9 @@ internal class PublicGroupDiscovery(
             try { manager.stopPeerDiscovery(ch, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() = configure()
                 override fun onFailure(reason: Int) = configure()
-            }) } catch (_: RuntimeException) { failed(WifiP2pManager.ERROR) }
+            }) } catch (_: RuntimeException) {
+                lastError = WifiP2pManager.ERROR
+            }
             handler.postDelayed({ runCycle() }, 12_000)
         }
         runCycle()

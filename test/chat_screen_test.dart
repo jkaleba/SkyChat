@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:offline_group_messenger/core/contacts/contact_repository.dart';
 import 'package:offline_group_messenger/core/messaging/chat_session_controller.dart';
 import 'package:offline_group_messenger/core/messaging/tcp_message_transport.dart';
 import 'package:offline_group_messenger/core/models/chat_message.dart';
@@ -229,4 +230,93 @@ void main() {
       expect(chat.draft, 'Offline draft');
     },
   );
+
+  testWidgets(
+    'uses saved contact name, updates on rename, and marks unknown senders',
+    (tester) async {
+      final contacts = _MutableContacts([
+        const SavedContact(
+          id: 'c-bob',
+          name: 'Saved Bob',
+          trust: ContactTrust.verified,
+        ),
+      ]);
+      final transport = _LabeledPeersTransport()
+        ..status = ChatStatus.ready
+        ..selfId = 'me';
+      final chat = ChatSessionController(transport: transport);
+      addTearDown(chat.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ChatScreen(
+            chat: chat,
+            contacts: contacts,
+            openContacts: () async {
+              contacts.list = const [
+                SavedContact(
+                  id: 'c-bob',
+                  name: 'Renamed Bob',
+                  trust: ContactTrust.verified,
+                ),
+              ];
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      transport.events.add(
+        ChatMessage(
+          id: 'm1',
+          groupId: 'g',
+          senderId: 'bob',
+          senderName: 'Original Bob',
+          senderContactId: 'c-bob',
+          text: 'Hello there',
+          sentAt: DateTime(2026),
+        ),
+      );
+      transport.events.add(
+        ChatMessage(
+          id: 'm2',
+          groupId: 'g',
+          senderId: 'eve',
+          senderName: 'Eve',
+          senderContactId: 'c-eve',
+          text: 'Who is this?',
+          sentAt: DateTime(2026),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Saved Bob'), findsOneWidget);
+      expect(find.text('Original Bob'), findsNothing);
+      expect(find.text('Eve (unknown)'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Contacts and calls'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Renamed Bob'), findsOneWidget);
+      expect(find.text('Saved Bob'), findsNothing);
+      expect(find.text('Eve (unknown)'), findsOneWidget);
+    },
+  );
+}
+
+class _MutableContacts extends ContactRepository {
+  _MutableContacts(this.list);
+  List<SavedContact> list;
+
+  @override
+  Future<ContactSnapshot> load() async => ContactSnapshot('self', list);
+}
+
+class _LabeledPeersTransport extends FakeTransport {
+  @override
+  List<Participant> get participants => const [
+    Participant(id: 'me', displayName: 'Me', contactId: 'self'),
+    Participant(id: 'bob', displayName: 'Original Bob', contactId: 'c-bob'),
+    Participant(id: 'eve', displayName: 'Eve', contactId: 'c-eve'),
+  ];
 }

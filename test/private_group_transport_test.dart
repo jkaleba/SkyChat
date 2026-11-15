@@ -1,7 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:offline_group_messenger/core/contacts/contact_repository.dart';
 import 'package:offline_group_messenger/core/messaging/tcp_message_transport.dart';
 import 'package:offline_group_messenger/core/messaging/chat_session_controller.dart';
 import 'session_recovery_test.dart' show until, texts;
+
+class _FakeContacts extends ContactRepository {
+  @override
+  Future<ContactSnapshot> load() async =>
+      const ContactSnapshot('host-contact-id', []);
+}
 
 void main() {
   test(
@@ -84,6 +91,51 @@ void main() {
         ['Before leaving', 'Missed message'],
       );
       expect(session.draft, 'Keep draft');
+    },
+  );
+
+  test(
+    'contact-verified private group admits known contacts and rejects unknown peers',
+    () async {
+      final host = TcpMessageTransport(contacts: _FakeContacts())
+        ..displayName = 'Host'
+        ..requireVerifiedContact = true
+        ..verifyContactAuth = (token, nonce) async {
+          if (token != 'valid:$nonce') throw StateError('Unknown contact');
+          return 'alice-contact-id';
+        };
+      final knownClient = TcpMessageTransport()
+        ..displayName = 'Alice'
+        ..requireContactAuth = true
+        ..signContactAuth = (hostId, nonce) async {
+          expect(hostId, 'host-contact-id');
+          return 'valid:$nonce';
+        };
+      final unknownClient = TcpMessageTransport()
+        ..displayName = 'Mallory'
+        ..requireContactAuth = true
+        ..signContactAuth = (hostId, nonce) async => 'invalid:$nonce';
+      addTearDown(() {
+        knownClient.dispose();
+        unknownClient.dispose();
+        host.dispose();
+      });
+
+      await host.startHost(port: 0, address: '127.0.0.1');
+
+      await knownClient.connect(host: '127.0.0.1', port: host.listeningPort!);
+      await until(() => knownClient.status == ChatStatus.ready);
+      await knownClient.sendText('Hello from contact');
+      await until(
+        () => host.messages.any((e) => e.text == 'Hello from contact'),
+      );
+
+      await unknownClient.connect(host: '127.0.0.1', port: host.listeningPort!);
+      await until(() => unknownClient.sessionEnded);
+      expect(
+        unknownClient.error,
+        'Only known contacts can join this private group.',
+      );
     },
   );
 }

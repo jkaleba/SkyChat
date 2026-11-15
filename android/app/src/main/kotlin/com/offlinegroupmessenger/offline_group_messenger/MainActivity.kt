@@ -1,9 +1,11 @@
 package com.offlinegroupmessenger.offline_group_messenger
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -12,7 +14,22 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val CHANNEL = "com.skychat/background"
+        private const val PREFS_NAME = "skychat_prefs"
+        private const val KEY_USERNAME = "username"
         private const val REQ_POST_NOTIFICATIONS = 4101
+    }
+
+    private fun defaultUsername(): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
+            val deviceName = Settings.Global.getString(
+                contentResolver,
+                Settings.Global.DEVICE_NAME
+            )?.trim()
+            if (!deviceName.isNullOrEmpty()) return deviceName
+        }
+        val model = Build.MODEL?.trim()
+        if (!model.isNullOrEmpty()) return model
+        return "Guest"
     }
 
     private var pendingPermissionResult: MethodChannel.Result? = null
@@ -76,6 +93,23 @@ class MainActivity : FlutterActivity() {
 
                     "moveToBackground" -> {
                         moveTaskToBack(true)
+                        result.success(null)
+                    }
+
+                    "getUsername" -> {
+                        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        val saved = prefs.getString(KEY_USERNAME, null)?.trim()
+                        result.success(if (!saved.isNullOrEmpty()) saved else defaultUsername())
+                    }
+
+                    "setUsername" -> {
+                        val name = call.argument<String>("name")?.trim() ?: ""
+                        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        if (name.isEmpty()) {
+                            prefs.edit().remove(KEY_USERNAME).apply()
+                        } else {
+                            prefs.edit().putString(KEY_USERNAME, name).apply()
+                        }
                         result.success(null)
                     }
 

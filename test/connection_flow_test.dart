@@ -4,6 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offline_connectivity/offline_connectivity.dart';
 import 'package:offline_group_messenger/app/app.dart';
+import 'package:offline_group_messenger/core/messaging/chat_session_controller.dart';
+import 'package:offline_group_messenger/core/messaging/tcp_message_transport.dart';
+import 'package:offline_group_messenger/features/home/home_screen.dart';
 
 class FakeConnection extends OfflineConnectivity {
   final updates = StreamController<GroupConnectionState>.broadcast();
@@ -67,14 +70,16 @@ void main() {
       addTearDown(connection.updates.close);
       await tester.pumpWidget(MessengerApp(connectivity: connection));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Create or join a group'));
+      await tester.tap(find.text('Create a group'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.text('Create a group'),
+        find.widgetWithText(FilledButton, 'Create a group'),
         150,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(find.text('Create a group'));
+      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create a group'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Create a group'));
       await tester.pumpAndSettle();
       expect(connection.creates, 1);
       expect(find.textContaining('Connecting —'), findsOneWidget);
@@ -145,14 +150,16 @@ void main() {
     addTearDown(connection.updates.close);
     await tester.pumpWidget(MessengerApp(connectivity: connection));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Create or join a group'));
+    await tester.tap(find.text('Create a group'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.text('Create a group'),
+      find.widgetWithText(FilledButton, 'Create a group'),
       150,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.tap(find.text('Create a group'));
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create a group'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Create a group'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Permission denied.'),
@@ -170,4 +177,88 @@ void main() {
       isNotNull,
     );
   });
+
+  testWidgets(
+    'shows Current connection and discovery notice when connected, and Last connection with preserved privacy after disconnect',
+    (tester) async {
+      final connection = FakeConnection();
+      final transport = _FakeHostTransport();
+      final chat = ChatSessionController(transport: transport);
+      addTearDown(() {
+        chat.dispose();
+        connection.updates.close();
+      });
+      await tester.pumpWidget(
+        MaterialApp(home: HomeScreen(connectivity: connection, chat: chat)),
+      );
+      await tester.pumpAndSettle();
+
+      chat.configureGroup(privateGroup: true);
+      connection.updates.add(
+        const GroupConnectionState(
+          status: GroupStatus.connected,
+          wifiEnabled: true,
+          permissionGranted: true,
+          isHost: true,
+          privateGroup: true,
+          hostAddress: '127.0.0.1',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Current connection'), findsOneWidget);
+      expect(find.text('Current private group'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Cannot discover groups while connected'),
+        150,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(
+        find.text('Cannot discover groups while connected'),
+        findsOneWidget,
+      );
+
+      connection.updates.add(
+        const GroupConnectionState(
+          status: GroupStatus.idle,
+          wifiEnabled: true,
+          permissionGranted: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(
+        find.text('Last connection'),
+        -150,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Last connection'), findsOneWidget);
+      expect(find.text('Last private group'), findsOneWidget);
+      expect(find.text('Current connection'), findsNothing);
+      expect(find.text('Cannot discover groups while connected'), findsNothing);
+    },
+  );
+}
+
+class _FakeHostTransport extends TcpMessageTransport {
+  String? _group;
+  @override
+  String? get groupId => _group;
+
+  @override
+  Future<void> startHost({
+    int port = TcpMessageTransport.defaultPort,
+    String? address,
+  }) async {
+    _group = 'g-private';
+    status = ChatStatus.ready;
+    selfId = 'host';
+    notifyListeners();
+  }
+
+  @override
+  Future<void> close() async {
+    status = ChatStatus.offline;
+    notifyListeners();
+  }
 }

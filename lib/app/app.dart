@@ -15,7 +15,7 @@ class MessengerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Offline Group Messenger',
+      title: 'SkyChat',
       debugShowCheckedModeBanner: false,
       theme: messengerTheme(Brightness.light),
       darkTheme: messengerTheme(Brightness.dark),

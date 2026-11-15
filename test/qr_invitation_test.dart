@@ -132,6 +132,8 @@ void main() {
       addTearDown(connection.updates.close);
       await tester.pumpWidget(MessengerApp(connectivity: connection));
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Create or join a group'));
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text('Scan group QR code'),
         150,
@@ -183,6 +185,8 @@ void main() {
     final connection = QrConnection();
     addTearDown(connection.updates.close);
     await tester.pumpWidget(MessengerApp(connectivity: connection));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create or join a group'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Scan group QR code'),

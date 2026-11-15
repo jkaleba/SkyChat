@@ -28,7 +28,14 @@ void main() {
       await tester.pumpWidget(const MessengerApp());
       await tester.pumpAndSettle();
 
+      expect(find.text('SkyChat'), findsOneWidget);
+      expect(find.text('Groups'), findsOneWidget);
+      expect(find.text('Contacts'), findsOneWidget);
+      expect(find.text('Calls'), findsOneWidget);
+      expect(find.text('Create or join a group'), findsOneWidget);
       expect(find.text('iOS adapter pending.'), findsOneWidget);
+      await tester.tap(find.text('Create or join a group'));
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byType(FilledButton),
         150,

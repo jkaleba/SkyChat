@@ -1,181 +1,23 @@
-# Offline Group Messenger
+# SkyChat
 
-Flutter GUI shared between Android and iPhone, with **Kotlin for Android
-connectivity** and a **Swift stub for future iOS connectivity**.
+**Course:** Mobile Systems 2026/27 AGH University
 
-## Status
+For detailed architecture, setup instructions, and the original project description, see [description.md](description.md).
 
-The Android connection prototype supports permissions, creating a Wi-Fi Direct
-group, discovering nearby devices, joining and disconnecting. Flutter receives
-live connection state, discovered peers, host/participant role and Android's actual
-group-owner IP address. The Material 3 interface is shared with iOS, whose
-connection adapter remains a stub. Connected Android phones can exchange text
-messages through a shared Dart TCP chat layer, with host broadcasting, a live
-participant list and join/leave notices.
+## Weekly Updates
 
-Choose **Private** (NFC invitations only) or **Public** when creating a group.
-Private groups do not appear in the app's discovery list and require an NFC-issued
-secret for new chat participants. Find nearby groups lists public discoveries and
-your remembered private group after successful NFC admission. A remembered entry
-checks availability when rejoining; it is not a public advertisement. Private hosts
-can remove online/offline members from Participants. See [membership](docs/private-membership.md).
-This is invitation-only membership, not encrypted chat or an invisible Wi-Fi signal.
-See [group modes](docs/group-modes.md).
+### Week 1
+- Scaffolded the Flutter app with Kotlin Android and Swift iOS connectivity bridges.
+- Added Android Wi-Fi Direct group creation/joining, QR code invitations, and NFC tap invitations.
+- Implemented offline group text chat over TCP with host broadcasting and participant lists.
 
-Public hosts can display a **group QR code**. On Android 10+, another phone can scan it,
-confirm the group and join without choosing a device from the discovery list.
-The scanner works offline and asks for camera permission when opened.
-Older Android phones can still discover public groups.
+### Week 2
+- Added resumable chat sessions with history replay, safe retries, and three-stage delivery receipts.
+- Implemented NFC-only private groups, public DNS-SD group discovery, participant revocation, and Wi-Fi Direct connection recovery.
+- Built BLE/GATT and local WebRTC Wi-Fi Direct audio feasibility labs.
+- Added hardware-backed Keystore identities, encrypted NFC-verified contacts, and authenticated foreground voice calling.
 
-Android phones with NFC can also use **tap invitations**. The host opens
-**Share via NFC**; the joining phone opens **Join via NFC**, taps the host and
-confirms the invitation. Sharing requires HCE support; joining requires Android
-10+ and NFC. Both phones must stay unlocked with the app open. Sharing turns off
-after 60 seconds, on leaving the sharing screen, or when the app is backgrounded.
-QR remains available for public groups on phones without NFC. Private groups have
-no QR fallback. See [NFC testing](docs/nfc-testing.md).
-
-## Structure
-
-```text
-lib/
-  app/                         App entry and shared theme
-  features/home/               Shared home screen
-  core/models/                 Message and participant models
-  features/chat/               Shared chat screen and participant list
-  core/messaging/              Session controller, TCP transport and contract
-android/                       Android app host (Kotlin)
-ios/                           iPhone app host (Swift / Xcode project)
-packages/offline_connectivity/
-  lib/                         Typed Dart API for the native bridge
-  android/src/main/kotlin/     Kotlin Wi-Fi Direct lifecycle and permissions
-  ios/Classes/                 Swift capability stub; iOS adapter goes here
-  test/                        Bridge contract checks
-test/                          App widget checks
-docs/                          Architecture, UI direction and bridge contract
-```
-
-There is no cloud backend. The intended first transport is an Android-hosted
-Wi-Fi Direct group, with Dart TCP code forwarding messages to participants.
-iPhone connectivity still needs validation on real devices; Swift does not add
-Wi-Fi Direct support to iOS.
-
-## Setup
-
-Use Flutter **3.35.7** (Dart 3.9), Android Studio and an Android SDK. Flutter uses
-the generated Android build configuration. Run `flutter doctor` to check tools.
-A development SDK downloaded during setup is in `.tools/flutter` and is not
-tracked; on this Windows workspace, you can use
-`.\.tools\flutter\bin\flutter.bat` in place of `flutter`.
-
-```sh
-flutter pub get
-flutter analyze
-flutter test
-cd packages/offline_connectivity
-flutter pub get
-flutter test
-cd ../..
-flutter run
-```
-
-Use a physical Android device when implementing/testing Wi-Fi Direct.
-The initial dependency downloads require Internet access; the eventual chat
-session will not.
-
-For iPhone, use **macOS with Xcode** and the iOS tooling reported by
-`flutter doctor`. Run `flutter run` with an iOS simulator or device selected.
-For signing/configuration, open `ios/Runner.xcworkspace`. Native iOS compilation
-cannot be checked on Windows.
-
-## Validation in this workspace
-
-- Flutter static analysis passed.
-- App widget tests and connectivity contract tests cover connection states,
-  peer selection, permission errors, method arguments and event subscriptions.
-- Android debug APK compilation passed.
-- Partial hardware checks are recorded in [offline setup](docs/offline-connection-recovery.md)
-  and [discovery joining](docs/discovery-join-recovery.md). Huawei standalone hosting
-  passed; Huawei-to-OPPO negotiation still failed after connect was accepted. The
-  full [Wi-Fi Direct matrix](docs/wifi-direct-testing.md) remains outstanding.
-- iOS compilation requires macOS and Xcode and has not been run.
-
-## Design and implementation plan
-
-Use Flutter Material 3 for a shared, accessible UI; Figma is optional for sketches.
-See [design](docs/design.md), [architecture](docs/architecture.md) and the
-[native bridge contract](docs/connectivity-contract.md).
-
-To chat: enter a display name before connecting, create or join a group, then
-tap **Open chat**. The host's chat server starts automatically, even while its
-QR invitation is displayed. All participants should keep the app in the foreground.
-Use the people button to see participants; return to the connection screen to
-disconnect. If the chat connection fails, use **Retry chat** or rejoin the same
-group. Client history and drafts survive retries, deliberately leaving/rejoining
-the same live group, and navigating away from chat;
-returning clients resume their identity and receive retained missed messages.
-Unconfirmed sends stay visible with **Retry message** and keep their original ID.
-The app does not automatically resend uncertain messages. A changed/ended host
-session requires an explicit new chat; old outgoing messages are never carried
-into it. All phones must run chat protocol v3 (rebuild/update older installations).
-
-This is a plaintext prototype without authenticated identities or end-to-end
-encryption. The last 500 messages/notices are kept in memory. The host separately
-retains 500 text messages for returning participants; a warning appears when some
-missed history has expired. First-time participants do not receive old history.
-Starting a new chat or restarting the process clears local conversation state.
-Host confirmation means the host accepted a message, not that every participant
-received or read it. One check means host acceptance; two mean at least one other
-client received it; three mean every targeted recipient received it. Tap checks for
-delivery details. Targets are the other participants connected at host acceptance,
-including the host. With two phones, both senders reach three when the other phone
-receives the message. A host sending alone stays at one. These are not read receipts.
-See [delivery receipts](docs/delivery-receipts.md). Chat history storage is not durable.
-
-Session recovery is implemented and covered by automated tests. Run the
-two/three-phone [chat checks](docs/chat-protocol.md) before declaring it
-hardware-validated. Android now includes durable NFC-verified contacts and
-foreground one-to-one calling between the host and a client in the same group.
-Integrated phone acceptance remains pending. Independent BLE calling, background
-calling and group push-to-talk follow later. Durable chat history remains separate. See
-[the roadmap](docs/roadmap.md) for acceptance criteria and remaining work.
-
-The separate [Transport Lab](tools/transport_lab/README.md) implements foreground
-BLE/GATT and local WebRTC audio experiments for that feasibility milestone. It
-installs alongside Messenger and does not add production contacts or calling.
-Short OPPO/MI-9 audio passed with user-confirmed audible conversation. Longer,
-router-free, client-client and BLE checks remain open; see [lab status](docs/transport-lab.md).
-
-## Contacts and calls in Messenger
-
-1. Install the current Messenger build on both Android phones. Open **Contacts**
-   from the home toolbar, then **Add contact by NFC**.
-2. Enter names. Choose **Receive contact** on one and **Read contact** on the other.
-   Hold NFC areas together, compare the full code and confirm on both screens.
-   Wait for both to show saved/verified. Interrupted pairing can be repeated.
-3. Create/join the same group normally. Contact pairing does not admit someone to
-   a private group; its separate NFC invitation is still required.
-4. Keep both apps open. In Contacts, a verified host/client contact becomes ready
-   to call. Tap the phone icon, then **Answer** on the receiving phone.
-5. Use mute, speaker/earpiece or hang-up. Return to chat while talking; the Current
-   call icon reopens controls. Leaving the app ends this foreground-only call.
-
-Contacts survive restart in encrypted local storage. Rename, block/delete and
-explicit identity reset are available in Contacts. A lost/reinstalled identity
-requires pairing again. There is no QR contact pairing. Old chat-only builds remain
-usable for chat but are not callable. Client-client calling stays disabled pending
-the three-phone test. See [security design](docs/contact-security.md) and
-[call protocol/acceptance](docs/call-signaling.md). Chat text is not encrypted by
-this calling feature; call negotiation is signed and WebRTC encrypts audio.
-
-## Original project concept
-
-The project aims to create an **offline group messaging app** that enables communication between multiple phones without Internet access or cellular coverage. Its main use case could be communication among a group of people on a plane, on a train, or in another location without network coverage.
-
-**NFC** would be used to let users join a group quickly and securely. The person creating the group would tap their phone against another person's phone to transfer the group identifier and the information needed to establish a connection. This would eliminate the need to enter codes manually or search for the correct group.
-
-After pairing, communication would take place over **Wi-Fi Direct**, which allows phones to create a local network without a router or an Internet connection. One phone would act as the **Group Owner**, serving as the group's local host. The other phones would connect to it and send messages, which would then be forwarded to all participants in the conversation.
-
-The basic version of the app would support text messages, a participant list, and notifications when someone joins or leaves the group. Messages could also be **encrypted** to keep communication private despite the use of a shared wireless connection.
-
-The main limitation would be the **range of Wi-Fi Direct**: all devices would need to remain within range of the phone acting as the Group Owner. Communication between all devices therefore could not be guaranteed on a large plane or over longer distances. A more advanced extension could introduce a **relay/multi-hop** mechanism, in which phones forward messages to devices beyond the sender's direct range. This would allow the app to form a simple decentralized communication network consisting entirely of users' phones.
+### Week 3
+- Integrated NFC contact calling screens and foreground call lifecycle.
+- Reworked the UI to SkyChat branding with bottom navigation (`Groups`, `Contacts`, `Calls`) and added an Android foreground service with message notifications.
+- Unified group discovery, advertised host usernames, added contact-ID-based dynamic naming with `(unknown)` labels, deduplicated rejoining participants, and added Current/Last connection status.

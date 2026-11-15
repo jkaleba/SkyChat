@@ -10,12 +10,20 @@ import '../../core/messaging/chat_session_controller.dart';
 import '../chat/chat_screen.dart';
 import '../contacts/contacts_screen.dart';
 import '../calling/call_screen.dart';
+import '../../core/background/background_service.dart';
 import '../../core/calling/call_controller.dart';
+import '../../core/models/chat_message.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.connectivity, this.chat});
+  const HomeScreen({
+    super.key,
+    required this.connectivity,
+    this.chat,
+    this.background = const BackgroundService(),
+  });
   final OfflineConnectivity connectivity;
   final ChatSessionController? chat;
+  final BackgroundService background;
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -37,6 +45,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _modeSelected = false;
   bool _showNearby = false;
   bool _disconnectingRevoked = false;
+  bool _inForeground = true;
+  bool _chatScreenOpen = false;
+  bool _backgroundRunning = false;
+  bool _notificationPermissionRequested = false;
+  StreamSubscription<ChatMessage>? _incomingMessages;
   int _selectedIndex = 0;
   final ValueNotifier<int> _uiRevision = ValueNotifier<int>(0);
   late final ChatSessionController _chat;
@@ -55,7 +68,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _calls = CallController(_chat.transport)..addListener(_callChanged);
     WidgetsBinding.instance.addObserver(this);
     _chat.addListener(_membershipChanged);
+    _incomingMessages = _chat.transport.incoming.listen(_onIncomingMessage);
     _load();
+  }
+
+  void _onIncomingMessage(ChatMessage message) {
+    if (!mounted || message.groupId != _chat.transport.groupId) return;
+    if (message.senderId.isEmpty || message.senderId == _chat.selfId) return;
+    if (!_inForeground || !_chatScreenOpen) {
+      unawaited(
+        widget.background.showMessageNotification(
+          sender: message.senderName,
+          text: message.text,
+        ),
+      );
+    }
+  }
+
+  void _syncBackgroundService(GroupConnectionState state) {
+    if (state.status == GroupStatus.connected) {
+      if (!_notificationPermissionRequested) {
+        _notificationPermissionRequested = true;
+        unawaited(widget.background.requestNotificationPermission());
+      }
+      if (!_backgroundRunning) {
+        _backgroundRunning = true;
+        unawaited(
+          widget.background.start(
+            title: 'SkyChat',
+            body: state.privateGroup
+                ? 'Connected to private group'
+                : 'Connected to public group',
+          ),
+        );
+      }
+    } else if (state.status == GroupStatus.idle && _backgroundRunning) {
+      _backgroundRunning = false;
+      unawaited(widget.background.stop());
+    }
   }
 
   void _callChanged() {
@@ -86,19 +136,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (mounted) await _calls.refreshContacts();
   }
 
-  void _openChat() {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => ChatScreen(
-          chat: _chat,
-          openContacts: _capabilities?.platform == 'android'
-              ? _openContacts
-              : null,
-          openCall: _openCall,
-          removePrivateMember: _removePrivateMember,
+  Future<void> _openChat() async {
+    if (_chatScreenOpen) return;
+    _chatScreenOpen = true;
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            chat: _chat,
+            openContacts: _capabilities?.platform == 'android'
+                ? _openContacts
+                : null,
+            openCall: _openCall,
+            removePrivateMember: _removePrivateMember,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _chatScreenOpen = false;
+    }
   }
 
   Future<void> _openCreateOrJoinGroup() async {
@@ -145,7 +201,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _calls.foreground(true);
+    if (state == AppLifecycleState.resumed) {
+      _inForeground = true;
+      _calls.foreground(true);
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _inForeground = false;
+    }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _calls.foreground(false);
@@ -215,6 +279,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 _error = state.errorMessage;
               });
               _chat.updateConnection(state, displayName: _displayName.text);
+              _syncBackgroundService(state);
             }
           },
           onError: (Object error) {
@@ -365,6 +430,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _incomingMessages?.cancel();
+    if (_backgroundRunning) {
+      _backgroundRunning = false;
+      unawaited(widget.background.stop());
+    }
     _calls.removeListener(_callChanged);
     _calls.dispose();
     _subscription?.cancel();
@@ -999,7 +1069,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: _connection.status != GroupStatus.connected,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _connection.status == GroupStatus.connected) {
+          unawaited(widget.background.moveToBackground());
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
@@ -1054,6 +1131,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             label: 'Calls',
           ),
         ],
+      ),
       ),
     );
   }

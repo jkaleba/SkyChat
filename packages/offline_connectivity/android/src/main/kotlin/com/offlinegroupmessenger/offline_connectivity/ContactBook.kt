@@ -82,6 +82,22 @@ internal class ContactBook(
         require(payload["scope"] == "ogm-call-v1" && payload["from"] == from && payload["to"] == crypto.id)
         return payload
     }
+    @Synchronized fun signGroupAuth(to: String, nonce: String): String {
+        require(records[to]?.get("state") == "verified")
+        require(nonce.length in 16..128)
+        return crypto.sign(mapOf("scope" to "ogm-group-v1", "from" to crypto.id, "to" to to, "nonce" to nonce))
+    }
+    @Synchronized fun verifyGroupAuth(token: String, expectedNonce: String): String {
+        require(token.length <= 24000)
+        val untrusted = JSONObjectUtils.parse(com.nimbusds.jose.JWSObject.parse(token).payload.toString())
+        val from = untrusted["from"] as String
+        val contact = requireNotNull(records[from])
+        require(contact["state"] == "verified")
+        val payload = ContactCrypto.verify(token, contact["key"] as String)
+        require(payload["scope"] == "ogm-group-v1" && payload["from"] == from && payload["to"] == crypto.id &&
+            payload["nonce"] == expectedNonce)
+        return from
+    }
     companion object {
         fun name(value: String): String = value.trim().also {
             require(it.length in 1..32 && it.none { c -> c.code < 32 || c.code == 127 })

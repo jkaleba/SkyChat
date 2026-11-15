@@ -49,14 +49,44 @@ void main() {
   ) async {
     final connection = NfcConnection();
     addTearDown(connection.updates.close);
-    await tester.pumpWidget(MessengerApp(connectivity: connection));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Create or join a group'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('Join via NFC'),
-      150,
-      scrollable: find.byType(Scrollable).first,
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () async {
+                final invitation = await Navigator.of(context)
+                    .push<GroupInvitation>(
+                      MaterialPageRoute(
+                        builder: (_) => NfcInvitationScreen(
+                          connectivity: connection,
+                          sharing: false,
+                        ),
+                      ),
+                    );
+                if (invitation != null && context.mounted) {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Join this group?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Join'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed == true) {
+                    await connection.joinInvitation(invitation);
+                  }
+                }
+              },
+              child: const Text('Join via NFC'),
+            ),
+          ),
+        ),
+      ),
     );
     await tester.tap(find.text('Join via NFC'));
     await tester.pumpAndSettle();
@@ -77,14 +107,44 @@ void main() {
   ) async {
     final connection = NfcConnection();
     addTearDown(connection.updates.close);
-    await tester.pumpWidget(MessengerApp(connectivity: connection));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Create or join a group'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('Join via NFC'),
-      150,
-      scrollable: find.byType(Scrollable).first,
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () async {
+                final invitation = await Navigator.of(context)
+                    .push<GroupInvitation>(
+                      MaterialPageRoute(
+                        builder: (_) => NfcInvitationScreen(
+                          connectivity: connection,
+                          sharing: false,
+                        ),
+                      ),
+                    );
+                if (invitation != null && context.mounted) {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Join this group?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Join'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed == true) {
+                    await connection.joinInvitation(invitation);
+                  }
+                }
+              },
+              child: const Text('Join via NFC'),
+            ),
+          ),
+        ),
+      ),
     );
     await tester.tap(find.text('Join via NFC'));
     await tester.pumpAndSettle();

@@ -30,6 +30,14 @@ internal class ContactsBridge(private val context: Context, messenger: BinaryMes
                         "snapshot" -> ContactVault.open(context).snapshot()
                         "signCall" -> ContactVault.open(context).signCall(requireNotNull(call.argument<Map<String, Any?>>("body")))
                         "verifyCall" -> ContactVault.open(context).verifyCall(requireNotNull(call.argument<String>("token")))
+                        "signGroupAuth" -> ContactVault.open(context).signGroupAuth(
+                            requireNotNull(call.argument<String>("to")),
+                            requireNotNull(call.argument<String>("nonce"))
+                        )
+                        "verifyGroupAuth" -> ContactVault.open(context).verifyGroupAuth(
+                            requireNotNull(call.argument<String>("token")),
+                            requireNotNull(call.argument<String>("nonce"))
+                        )
                         "pairingApprove" -> requireNotNull(nfc.pairing).approve()
                         "rename" -> ContactVault.open(context).rename(
                             requireNotNull(call.argument<String>("id")), requireNotNull(call.argument<String>("name")))

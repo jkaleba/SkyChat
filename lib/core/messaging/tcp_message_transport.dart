@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../contacts/contact_repository.dart';
 import '../models/chat_message.dart';
 import '../models/message_delivery.dart';
 import '../models/participant.dart';
@@ -24,7 +25,19 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   TcpMessageTransport({
     this.confirmationTimeout = const Duration(seconds: 6),
     this.callCapable = true,
-  });
+    ContactRepository contacts = const ContactRepository(),
+    this.signContactAuth,
+    this.verifyContactAuth,
+  }) : _contacts = contacts;
+  final ContactRepository _contacts;
+  Future<String> Function(String hostContactId, String nonce)? signContactAuth;
+  Future<String> Function(String token, String nonce)? verifyContactAuth;
+  bool requireVerifiedContact = false;
+  bool requireContactAuth = false;
+  String? _hostContactId;
+  String? _selfContactId;
+  final _challenges = <Socket, String>{};
+  bool _awaitingChallenge = false;
   final bool callCapable;
   bool _callRelay = false;
   String? hostId;
@@ -85,7 +98,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   List<Participant> get participants => List.unmodifiable(_participants);
   bool get canManagePrivateMembers =>
       _isHost &&
-      hostAdmissionToken != null &&
+      (hostAdmissionToken != null || requireVerifiedContact) &&
       status == ChatStatus.ready &&
       !sessionEnded;
   List<Participant> get members => canManagePrivateMembers
@@ -154,6 +167,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     _prepare();
     final epoch = _epoch;
     try {
+      _hostContactId ??= await _loadSelfContactId();
       final server = await ServerSocket.bind(address, port);
       if (epoch != _epoch) {
         await server.close();
@@ -167,6 +181,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
           id: selfId!,
           displayName: _name(displayName),
           canCall: callCapable,
+          contactId: _hostContactId,
         ),
       );
       _participants.add(_hostIdentity!.participant);
@@ -180,10 +195,20 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
           }
           _peers[socket] = null;
           _listen(socket, epoch);
+          if (requireVerifiedContact) {
+            final nonce = _id();
+            _challenges[socket] = nonce;
+            _write(socket, {
+              'type': 'challenge',
+              'hostContactId': _hostContactId ?? '',
+              'nonce': nonce,
+            });
+          }
           Future<void>.delayed(const Duration(seconds: 5), () {
             if (epoch == _epoch &&
                 _peers.containsKey(socket) &&
                 _peers[socket] == null) {
+              _challenges.remove(socket);
               _lost(socket);
             }
           });
@@ -200,7 +225,10 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   }
 
   @override
-  Future<void> connect({required String host, required int port}) async {
+  Future<void> connect({
+    required String host,
+    required int port,
+  }) async {
     if (sessionEnded) return;
     _isHost = false;
     _prepare();
@@ -217,17 +245,13 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
           return;
         }
         _host = socket;
+        _awaitingChallenge = requireContactAuth;
         _listen(socket, epoch);
-        _write(socket, {
-          'type': 'hello',
-          'name': _name(displayName),
-          'calls': callCapable ? 1 : 0,
-          'after': _sequence,
-          if (_resumeToken != null) 'token': _resumeToken,
-          if (_groupId != null) 'groupId': _groupId,
-          if (_resumeToken == null && invitationToken != null)
-            'admissionToken': invitationToken,
-        });
+        if (!requireContactAuth) {
+          await _loadSelfContactId();
+          if (epoch != _epoch || !identical(_host, socket)) return;
+          _sendHello(socket);
+        }
         _startHeartbeat();
         Future<void>.delayed(const Duration(seconds: 5), () {
           if (epoch == _epoch && status == ChatStatus.connecting) {
@@ -329,6 +353,53 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     return _number(value);
   }
 
+  Future<String?> _loadSelfContactId() async {
+    if (_selfContactId != null) return _selfContactId;
+    try {
+      _selfContactId = (await _contacts.load()).identity;
+    } catch (_) {
+      // Best-effort; unavailable in unit tests without contacts channel.
+    }
+    return _selfContactId;
+  }
+
+  void _sendHello(Socket socket, {String? contactAuth}) {
+    _write(socket, {
+      'type': 'hello',
+      'name': _name(displayName),
+      'calls': callCapable ? 1 : 0,
+      'after': _sequence,
+      if (_selfContactId != null) 'contactId': _selfContactId,
+      if (_resumeToken != null) 'token': _resumeToken,
+      if (_groupId != null) 'groupId': _groupId,
+      if (_resumeToken == null && invitationToken != null)
+        'admissionToken': invitationToken,
+      if (contactAuth != null) 'contactAuth': contactAuth,
+    });
+  }
+
+  Future<void> _respondToChallenge(
+    Socket socket,
+    Map<String, dynamic> frame,
+    int epoch,
+  ) async {
+    final hostContactId = _string(frame['hostContactId'], 128);
+    final nonce = _string(frame['nonce'], 128);
+    try {
+      await _loadSelfContactId();
+      final signer = signContactAuth ?? _contacts.signGroupAuth;
+      final token = await signer(hostContactId, nonce);
+      if (epoch != _epoch || !identical(_host, socket)) return;
+      _awaitingChallenge = false;
+      _sendHello(socket, contactAuth: token);
+    } catch (_) {
+      if (epoch != _epoch || !identical(_host, socket)) return;
+      _end(
+        'Only known contacts can join this private group. Add each other in Contacts first.',
+      );
+    }
+  }
+
   static String _name(String value) => value.trim().isEmpty
       ? 'Guest'
       : value.trim().substring(0, min(value.trim().length, 32));
@@ -403,6 +474,12 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       case 'ended':
         membershipRevoked = frame['code'] == 'revoked';
         _end(_string(frame['reason'], 200));
+      case 'challenge':
+        if (_welcomed || !_awaitingChallenge) {
+          throw const FormatException('Unexpected challenge');
+        }
+        _awaitingChallenge = false;
+        unawaited(_respondToChallenge(socket, frame, _epoch));
       case 'welcome':
         if (_welcomed) throw const FormatException('Duplicate welcome');
         final group = _string(frame['groupId'], 64);
@@ -440,6 +517,9 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
                 id: _string(p['id'], 64),
                 displayName: _string(p['name'], 32),
                 canCall: p['calls'] == 1,
+                contactId: p['contactId'] is String
+                    ? _string(p['contactId'], 128)
+                    : null,
               ),
             )
             .toList();
@@ -476,11 +556,19 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       case 'message':
       case 'ack':
         if (!_welcomed || !_hasRoster) throw const FormatException('Not ready');
+        final senderId = _string(frame['senderId'], 64);
+        final contactId = frame['contactId'] is String
+            ? _string(frame['contactId'], 128)
+            : _participants
+                  .where((p) => p.id == senderId)
+                  .map((p) => p.contactId)
+                  .firstOrNull;
         final message = ChatMessage(
           id: _string(frame['id'], 130),
           groupId: _groupId!,
-          senderId: _string(frame['senderId'], 64),
+          senderId: senderId,
           senderName: _string(frame['name'], 32),
+          senderContactId: contactId,
           text: _string(frame['text'], maxTextLength),
           sentAt: DateTime.parse(_string(frame['time'], 40)),
           sequence: _number(frame['sequence']),
@@ -587,6 +675,65 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       );
       return;
     }
+    if (!resume && requireVerifiedContact) {
+      final challenge = _challenges.remove(socket);
+      final contactAuth = frame['contactAuth'];
+      final verifier = verifyContactAuth;
+      if (challenge == null ||
+          verifier == null ||
+          contactAuth is! String ||
+          contactAuth.isEmpty) {
+        _rejectSession(
+          socket,
+          'Only known contacts can join this private group.',
+        );
+        return;
+      }
+      unawaited(() async {
+        try {
+          final verified = await verifier(contactAuth, challenge);
+          if (!_peers.containsKey(socket)) return;
+          if (verified == null) {
+            _rejectSession(
+              socket,
+              'Only known contacts can join this private group.',
+            );
+            return;
+          }
+          _completeHello(
+            socket,
+            frame,
+            name,
+            after,
+            resume,
+            verifiedContactId: verified,
+          );
+        } catch (_) {
+          if (_peers.containsKey(socket)) {
+            _rejectSession(
+              socket,
+              'Only known contacts can join this private group.',
+            );
+          }
+        }
+      }());
+      return;
+    }
+    _completeHello(socket, frame, name, after, resume);
+  }
+
+  void _completeHello(
+    Socket socket,
+    Map<String, dynamic> frame,
+    String name,
+    int after,
+    bool resume, {
+    String? verifiedContactId,
+  }) {
+    final claimedContactId = frame['contactId'] is String
+        ? _string(frame['contactId'], 128)
+        : null;
+    final contactId = verifiedContactId ?? claimedContactId;
     String token;
     _Identity identity;
     if (resume) {
@@ -619,21 +766,44 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       _participants.removeWhere((p) => p.id == identity.participant.id);
     } else {
       if (after != 0) throw const FormatException('New participant cursor');
-      if (_identities.length >= identityLimit) {
-        _rejectSession(
-          socket,
-          'This session has reached its participant limit. Ask the host to start a new group.',
-        );
-        return;
+      MapEntry<String, _Identity>? matched;
+      if (contactId != null && contactId.isNotEmpty) {
+        for (final entry in _identities.entries) {
+          if (!entry.value.revoked &&
+              entry.value.participant.contactId == contactId) {
+            matched = entry;
+            break;
+          }
+        }
       }
-      token = _id();
-      identity = _Identity(Participant(id: _id(), displayName: name));
-      _identities[token] = identity;
+      if (matched != null) {
+        token = matched.key;
+        identity = matched.value;
+        for (final entry in _peers.entries.toList()) {
+          if (identical(entry.value, identity)) {
+            _peers.remove(entry.key);
+            entry.key.destroy();
+          }
+        }
+        _participants.removeWhere((p) => p.id == identity.participant.id);
+      } else {
+        if (_identities.length >= identityLimit) {
+          _rejectSession(
+            socket,
+            'This session has reached its participant limit. Ask the host to start a new group.',
+          );
+          return;
+        }
+        token = _id();
+        identity = _Identity(Participant(id: _id(), displayName: name));
+        _identities[token] = identity;
+      }
     }
     identity.participant = Participant(
       id: identity.participant.id,
-      displayName: identity.participant.displayName,
+      displayName: name,
       canCall: frame['calls'] == 1,
+      contactId: contactId ?? identity.participant.contactId,
     );
     _peers[socket] = identity;
     if (error == versionMismatchMessage) error = null;
@@ -676,28 +846,37 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     _drain(socket);
   }
 
-  /// Call only after the native NFC payload has been rotated successfully.
+  /// Removes a member from a private group, rotating [hostAdmissionToken] if used.
   void removePrivateMember(
     String participantId, {
-    required String newAdmissionToken,
+    String? newAdmissionToken,
   }) {
-    if (!canRemoveMember(participantId) ||
-        !RegExp(r'^[0-9a-f]{64}$').hasMatch(newAdmissionToken) ||
-        newAdmissionToken == hostAdmissionToken) {
+    if (!canRemoveMember(participantId)) {
       throw StateError(
         'Private membership changed. Refresh the participant list.',
       );
     }
+    if (hostAdmissionToken != null) {
+      if (newAdmissionToken == null ||
+          !RegExp(r'^[0-9a-f]{64}$').hasMatch(newAdmissionToken) ||
+          newAdmissionToken == hostAdmissionToken) {
+        throw StateError(
+          'Private membership changed. Refresh the participant list.',
+        );
+      }
+      hostAdmissionToken = newAdmissionToken;
+    }
     final identity = _identities.values.singleWhere(
       (i) => i.participant.id == participantId,
     );
-    hostAdmissionToken = newAdmissionToken;
     identity.revoked = true;
     for (final entry in _peers.entries.toList()) {
       if (identical(entry.value, identity)) {
         _rejectSession(
           entry.key,
-          'The host removed you from this private group. A new NFC invitation is required.',
+          hostAdmissionToken != null
+              ? 'The host removed you from this private group. A new NFC invitation is required.'
+              : 'The host removed you from this private group.',
           code: 'revoked',
         );
       }
@@ -712,6 +891,8 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
         'id': message.id,
         'senderId': message.senderId,
         'name': message.senderName,
+        if (message.senderContactId != null)
+          'contactId': message.senderContactId,
         'text': message.text,
         'time': message.sentAt.toIso8601String(),
         'sequence': message.sequence,
@@ -748,6 +929,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       groupId: _groupId!,
       senderId: sender.id,
       senderName: sender.displayName,
+      senderContactId: sender.contactId,
       text: text,
       sentAt: DateTime.now().toUtc(),
       sequence: ++_sequence,
@@ -833,7 +1015,12 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       'type': 'roster',
       'participants': [
         for (final p in _participants)
-          {'id': p.id, 'name': p.displayName, 'calls': p.canCall ? 1 : 0},
+          {
+            'id': p.id,
+            'name': p.displayName,
+            'calls': p.canCall ? 1 : 0,
+            if (p.contactId != null) 'contactId': p.contactId,
+          },
       ],
       'notice': notice,
     });

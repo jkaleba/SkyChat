@@ -32,9 +32,9 @@ void main() {
       expect(find.text('Groups'), findsOneWidget);
       expect(find.text('Contacts'), findsOneWidget);
       expect(find.text('Calls'), findsOneWidget);
-      expect(find.text('Create or join a group'), findsOneWidget);
+      expect(find.text('Create a group'), findsOneWidget);
       expect(find.text('iOS adapter pending.'), findsOneWidget);
-      await tester.tap(find.text('Create or join a group'));
+      await tester.tap(find.text('Create a group'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byType(FilledButton),
@@ -43,15 +43,6 @@ void main() {
       );
       expect(
         tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
-        isNull,
-      );
-      await tester.scrollUntilVisible(
-        find.byType(OutlinedButton),
-        150,
-        scrollable: find.byType(Scrollable).first,
-      );
-      expect(
-        tester.widget<OutlinedButton>(find.byType(OutlinedButton)).onPressed,
         isNull,
       );
     },

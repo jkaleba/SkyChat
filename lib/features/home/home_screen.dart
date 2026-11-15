@@ -12,6 +12,7 @@ import '../contacts/contacts_screen.dart';
 import '../calling/call_screen.dart';
 import '../../core/background/background_service.dart';
 import '../../core/calling/call_controller.dart';
+import '../../core/contacts/contact_repository.dart';
 import '../../core/models/chat_message.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -20,10 +21,12 @@ class HomeScreen extends StatefulWidget {
     required this.connectivity,
     this.chat,
     this.background = const BackgroundService(),
+    this.contacts = const ContactRepository(),
   });
   final OfflineConnectivity connectivity;
   final ChatSessionController? chat;
   final BackgroundService background;
+  final ContactRepository contacts;
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -37,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription<GroupConnectionState>? _subscription;
   bool _loading = true;
   bool _running = false;
+  bool _cancelling = false;
   String? _error;
   bool _capabilityError = false;
   GroupInvitation? _invitation;
@@ -49,11 +53,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _chatScreenOpen = false;
   bool _backgroundRunning = false;
   bool _notificationPermissionRequested = false;
+  Set<String> _verifiedContactIds = {};
+  Map<String, String> _contactNames = {};
+  bool _contactsLoaded = false;
   StreamSubscription<ChatMessage>? _incomingMessages;
   int _selectedIndex = 0;
   final ValueNotifier<int> _uiRevision = ValueNotifier<int>(0);
   late final ChatSessionController _chat;
-  final _displayName = TextEditingController(text: 'Guest');
+  String _username = 'Guest';
 
   @override
   void setState(VoidCallback fn) {
@@ -64,12 +71,57 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    _chat = widget.chat ?? ChatSessionController();
+    _chat =
+        widget.chat ??
+        ChatSessionController(
+          transport: TcpMessageTransport(contacts: widget.contacts),
+        );
+    _chat.transport.signContactAuth ??= (hostContactId, nonce) =>
+        widget.contacts.signGroupAuth(hostContactId, nonce);
+    _chat.transport.verifyContactAuth ??= (token, nonce) =>
+        widget.contacts.verifyGroupAuth(token, nonce);
     _calls = CallController(_chat.transport)..addListener(_callChanged);
     WidgetsBinding.instance.addObserver(this);
     _chat.addListener(_membershipChanged);
     _incomingMessages = _chat.transport.incoming.listen(_onIncomingMessage);
+    unawaited(_loadUsername());
+    unawaited(_loadVerifiedContacts());
     _load();
+  }
+
+  Future<void> _loadUsername() async {
+    final username = await widget.contacts.loadUsername();
+    if (mounted) _applyUsername(username);
+  }
+
+  Future<void> _loadVerifiedContacts() async {
+    try {
+      final snapshot = await widget.contacts.load();
+      if (!mounted) return;
+      final verified = snapshot.contacts.where(
+        (c) => c.trust == ContactTrust.verified,
+      );
+      setState(() {
+        _verifiedContactIds = verified.map((c) => c.id).toSet();
+        _contactNames = {for (final c in verified) c.id: c.name};
+        _contactsLoaded = true;
+      });
+    } on MissingPluginException {
+      // Ignored in tests without contacts channel.
+    } on PlatformException {
+      // Best-effort.
+    }
+  }
+
+  String _senderLabelForMessage(ChatMessage message) {
+    if (message.senderId.isEmpty) return 'Group';
+    if (message.senderId == _chat.selfId) return 'You';
+    return resolveSenderLabel(
+      senderName: message.senderName,
+      senderContactId: message.senderContactId,
+      contactNames: _contactNames,
+      contactsLoaded: _contactsLoaded,
+    );
   }
 
   void _onIncomingMessage(ChatMessage message) {
@@ -78,7 +130,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_inForeground || !_chatScreenOpen) {
       unawaited(
         widget.background.showMessageNotification(
-          sender: message.senderName,
+          sender: _senderLabelForMessage(message),
           text: message.text,
         ),
       );
@@ -131,9 +183,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _openContacts() async {
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => ContactsScreen(calls: _calls)),
+      MaterialPageRoute<void>(
+        builder: (_) => ContactsScreen(
+          repository: widget.contacts,
+          calls: _calls,
+          onUsernameChanged: _applyUsername,
+        ),
+      ),
     );
-    if (mounted) await _calls.refreshContacts();
+    if (mounted) {
+      _applyUsername(await widget.contacts.loadUsername());
+      await _calls.refreshContacts();
+      unawaited(_loadVerifiedContacts());
+    }
+  }
+
+  void _applyUsername(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    _username = trimmed;
+    _chat.transport.displayName = trimmed;
   }
 
   Future<void> _openChat() async {
@@ -144,6 +213,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         MaterialPageRoute(
           builder: (_) => ChatScreen(
             chat: _chat,
+            contacts: widget.contacts,
             openContacts: _capabilities?.platform == 'android'
                 ? _openContacts
                 : null,
@@ -154,10 +224,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     } finally {
       _chatScreenOpen = false;
+      if (mounted) unawaited(_loadVerifiedContacts());
     }
   }
 
-  Future<void> _openCreateOrJoinGroup() async {
+  Future<void> _openCreateGroup() async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => ListenableBuilder(
@@ -178,7 +249,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(width: 10),
                   const Flexible(
                     child: Text(
-                      'Create or join a group',
+                      'Create a group',
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -189,7 +260,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 560),
-                  child: _buildCreateOrJoinContent(context),
+                  child: _buildCreateGroupContent(context),
                 ),
               ),
             ),
@@ -262,7 +333,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await _subscription?.cancel();
       if (!mounted) return;
       _capabilities = capabilities;
-      if (!_modeSelected) _privateMode = capabilities.canShareNfc;
+      if (!_modeSelected) _privateMode = false;
       if (capabilities.implementationReady &&
           capabilities.wifiDirectSupported) {
         _subscription = widget.connectivity.states.listen(
@@ -278,7 +349,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 }
                 _error = state.errorMessage;
               });
-              _chat.updateConnection(state, displayName: _displayName.text);
+              _chat.updateConnection(state, displayName: _username);
               _syncBackgroundService(state);
             }
           },
@@ -315,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       await action();
     } on PlatformException catch (error) {
-      if (mounted) {
+      if (mounted && error.code != 'cancelled') {
         setState(() {
           _error = error.message ?? 'Connection request failed.';
         });
@@ -358,10 +429,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
       if (leave != true || !mounted) return;
     }
-    await _run(() async {
-      await widget.connectivity.disconnect();
-      await _chat.leave();
+    setState(() {
+      _cancelling = true;
+      _error = null;
     });
+    try {
+      await _run(() async {
+        try {
+          await widget.connectivity.disconnect();
+        } finally {
+          await _chat.leave();
+          if (_backgroundRunning) {
+            _backgroundRunning = false;
+            unawaited(widget.background.stop());
+          }
+        }
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _cancelling = false;
+        });
+      }
+    }
   }
 
   Future<void> _showInvitation() => _run(() async {
@@ -440,7 +530,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _subscription?.cancel();
     _chat.removeListener(_membershipChanged);
     if (widget.chat == null) _chat.dispose();
-    _displayName.dispose();
     _uiRevision.dispose();
     super.dispose();
   }
@@ -458,6 +547,53 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }.contains(_connection.status);
 
   bool get _canStart => _ready && !_running && !_occupied;
+
+  bool get _canCancel =>
+      !_cancelling &&
+      (!_running ||
+          _connection.status == GroupStatus.discovering ||
+          _connection.status == GroupStatus.connecting);
+
+  Widget _buildPeerCard(NearbyPeer peer, bool canStart) {
+    final isPrivate = peer.privateGroup;
+    final isKnownContact =
+        !isPrivate ||
+        (peer.hostContactId != null &&
+            _verifiedContactIds.contains(peer.hostContactId));
+    final allowJoin = canStart && isKnownContact;
+    Future<void> join() => _run(() async {
+      _chat.beginNewSession();
+      _chat.prepareJoin();
+      await widget.connectivity.joinGroup(peer.id);
+    });
+    final contactName = peer.hostContactId != null
+        ? _contactNames[peer.hostContactId!]
+        : null;
+    final peerTitle = (contactName != null && contactName.isNotEmpty)
+        ? contactName
+        : (peer.name.isEmpty ? 'Nearby device' : peer.name);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          child: Icon(isPrivate ? Icons.lock_outline : Icons.public),
+        ),
+        title: Text(peerTitle),
+        subtitle: Text(
+          isPrivate
+              ? (isKnownContact
+                    ? 'Private group (known contact)'
+                    : 'Private group (unknown host — add as contact to join)')
+              : (peer.isGroupOwner ? 'Public group host' : 'Public group'),
+        ),
+        trailing: TextButton(
+          onPressed: allowJoin ? join : null,
+          child: const Text('Join'),
+        ),
+        onTap: allowJoin ? join : null,
+      ),
+    );
+  }
 
   String get _statusText => switch (_connection.status) {
     GroupStatus.idle => 'Not connected',
@@ -486,12 +622,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
               child: const Icon(Icons.add),
             ),
-            title: const Text('Create or join a group'),
-            subtitle: const Text(
-              'Start a private or public group, scan QR, or tap NFC',
-            ),
+            title: const Text('Create a group'),
+            subtitle: const Text('Start a private or public group'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: _openCreateOrJoinGroup,
+            onTap: _openCreateGroup,
           ),
         ),
         if (!_ready || _error != null || _connection.status != GroupStatus.idle)
@@ -514,7 +648,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   if (ready && _connection.status == GroupStatus.connected) ...[
                     Text(
                       _connection.privateGroup
-                          ? 'Private group · NFC invitations only'
+                          ? 'Private group · Known contacts only'
                           : 'Public group',
                     ),
                     if (_connection.hostAddress != null) ...[
@@ -543,14 +677,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        if (_capabilities?.canShareNfc ?? false)
-                          OutlinedButton.icon(
-                            onPressed: _running
-                                ? null
-                                : () => _nfcInvitation(sharing: true),
-                            icon: const Icon(Icons.nfc),
-                            label: const Text('Share via NFC'),
-                          ),
                         if (!_connection.privateGroup)
                           OutlinedButton.icon(
                             onPressed: _running ? null : _showInvitation,
@@ -597,7 +723,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
-                        onPressed: _running ? null : _disconnect,
+                        onPressed: _canCancel ? _disconnect : null,
                         child: Text(
                           _connection.status == GroupStatus.connected
                               ? 'Disconnect'
@@ -610,28 +736,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
         if (_connection.status == GroupStatus.connected ||
-            _chat.hasConversation)
+            _chat.hasConversation) ...[
+          Text(
+            _connection.status == GroupStatus.connected
+                ? 'Current connection'
+                : 'Last connection',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
           ListenableBuilder(
             listenable: _chat,
             builder: (context, _) {
+              final isConnected = _connection.status == GroupStatus.connected;
+              final isPrivate = isConnected
+                  ? _connection.privateGroup
+                  : _chat.isPrivateGroup;
               final messages = _chat.messages;
               final lastText = messages.isNotEmpty
-                  ? '${messages.last.message.senderName}: ${messages.last.message.text}'
-                  : (_connection.privateGroup
+                  ? '${_senderLabelForMessage(messages.last.message)}: ${messages.last.message.text}'
+                  : (isPrivate
                         ? 'Private group · Tap to open chat'
                         : 'Public group · Tap to open chat');
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 child: ListTile(
                   leading: CircleAvatar(
-                    child: Icon(
-                      _connection.privateGroup ? Icons.lock : Icons.groups,
-                    ),
+                    child: Icon(isPrivate ? Icons.lock : Icons.groups),
                   ),
                   title: Text(
-                    _connection.privateGroup
-                        ? 'Current private group'
-                        : 'Current public group',
+                    isConnected
+                        ? (isPrivate
+                              ? 'Current private group'
+                              : 'Current public group')
+                        : (isPrivate
+                              ? 'Last private group'
+                              : 'Last public group'),
                   ),
                   subtitle: Text(
                     lastText,
@@ -644,23 +783,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               );
             },
           ),
-        if (_connection.status == GroupStatus.connected ||
-            _chat.hasConversation)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: ListenableBuilder(
-              listenable: _chat,
-              builder: (context, _) => OutlinedButton.icon(
-                icon: const Icon(Icons.chat_bubble_outline),
-                label: Text(
-                  _chat.status == ChatStatus.ready
-                      ? 'Open chat'
-                      : 'Open chat / connection status',
-                ),
-                onPressed: _openChat,
-              ),
-            ),
-          ),
+        ],
         Wrap(
           alignment: WrapAlignment.spaceBetween,
           crossAxisAlignment: WrapCrossAlignment.center,
@@ -676,6 +799,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               icon: const Icon(Icons.search),
               label: const Text('Find nearby groups'),
             ),
+            if (ready && (_capabilities?.canJoinQr ?? false))
+              TextButton.icon(
+                onPressed: canStart ? _scanInvitation : null,
+                icon: const Icon(Icons.qr_code_scanner),
+                label: const Text('Scan group QR code'),
+              ),
           ],
         ),
         const SizedBox(height: 8),
@@ -728,44 +857,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           : null,
                     ),
                   ),
-                for (final peer in peers)
+                for (final peer in peers) _buildPeerCard(peer, canStart),
+                if (_connection.status == GroupStatus.connected)
                   Card(
                     margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      leading: const CircleAvatar(child: Icon(Icons.public)),
-                      title: Text(
-                        peer.name.isEmpty ? 'Nearby device' : peer.name,
-                      ),
+                    child: const ListTile(
+                      leading: CircleAvatar(child: Icon(Icons.wifi_off)),
+                      title: Text('Cannot discover groups while connected'),
                       subtitle: Text(
-                        peer.isGroupOwner
-                            ? 'Public group host'
-                            : 'Public group',
+                        'While connected to a server, you cannot discover new groups. Disconnect first to search.',
                       ),
-                      trailing: TextButton(
-                        onPressed: canStart
-                            ? () => _run(() async {
-                                _chat.prepareJoin();
-                                await widget.connectivity.joinGroup(peer.id);
-                              })
-                            : null,
-                        child: const Text('Join'),
-                      ),
-                      onTap: canStart
-                          ? () => _run(() async {
-                              _chat.prepareJoin();
-                              await widget.connectivity.joinGroup(peer.id);
-                            })
-                          : null,
                     ),
-                  ),
-                if (remembered == null && peers.isEmpty)
+                  )
+                else if (remembered == null && peers.isEmpty)
                   Card(
                     margin: const EdgeInsets.only(bottom: 8),
                     child: const ListTile(
                       leading: CircleAvatar(child: Icon(Icons.wifi_tethering)),
                       title: Text('No groups listed yet'),
                       subtitle: Text(
-                        'Tap "Find nearby groups" to discover public groups or use "Create or join a group" above.',
+                        'Tap "Find nearby groups" to discover groups or use "Create a group" above.',
                       ),
                     ),
                   ),
@@ -777,7 +888,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildCreateOrJoinContent(BuildContext context) {
+  Widget _buildCreateGroupContent(BuildContext context) {
     final ready = _ready;
     final occupied = _occupied;
     final canStart = _canStart;
@@ -786,20 +897,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       padding: const EdgeInsets.all(24),
       children: [
         Text(
-          'Connect your group',
+          'Create a group',
           style: Theme.of(context).textTheme.headlineLarge,
         ),
         const SizedBox(height: 12),
         const Text(
-          'Create a private group and invite people by NFC tap, or make a public group discoverable nearby.',
+          'Create a private group for known contacts, or make a public group discoverable nearby.',
         ),
         const SizedBox(height: 16),
-        TextField(
-          controller: _displayName,
-          enabled: !occupied && !_running,
-          maxLength: 32,
-          decoration: const InputDecoration(labelText: 'Your chat name'),
-        ),
         if (_connection.status == GroupStatus.connected ||
             _chat.hasConversation)
           ListenableBuilder(
@@ -817,12 +922,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (ready &&
             _connection.status == GroupStatus.connected &&
             _connection.isHost) ...[
-          if (_capabilities?.canShareNfc ?? false)
-            OutlinedButton.icon(
-              onPressed: _running ? null : () => _nfcInvitation(sharing: true),
-              icon: const Icon(Icons.nfc),
-              label: const Text('Share via NFC'),
-            ),
           if (!_connection.privateGroup)
             OutlinedButton.icon(
               onPressed: _running ? null : _showInvitation,
@@ -883,7 +982,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   if (_connection.status == GroupStatus.connected)
                     Text(
                       _connection.privateGroup
-                          ? 'Private group · NFC invitations only'
+                          ? 'Private group · Known contacts only'
                           : 'Public group',
                     ),
                   const SizedBox(height: 8),
@@ -920,14 +1019,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         const SizedBox(height: 16),
         if (ready && !occupied) ...[
           SegmentedButton<bool>(
-            segments: [
+            showSelectedIcon: false,
+            segments: const [
               ButtonSegment(
                 value: true,
-                label: const Text('Private'),
-                icon: const Icon(Icons.nfc),
-                enabled: _capabilities?.canShareNfc ?? false,
+                label: Text('Private'),
+                icon: Icon(Icons.lock_outline),
               ),
-              const ButtonSegment(
+              ButtonSegment(
                 value: false,
                 label: Text('Public'),
                 icon: Icon(Icons.public),
@@ -944,11 +1043,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 8),
           Text(
             _privateMode
-                ? 'Invite by NFC tap only. Not listed in this app’s discovery. The Wi-Fi signal remains detectable; chat is not yet encrypted.'
+                ? 'Listed for nearby app users. Only known contacts can join; chat is not yet encrypted.'
                 : 'Listed for nearby app users. Join through discovery, QR or NFC. Chat is not yet encrypted.',
           ),
-          if (!(_capabilities?.canShareNfc ?? false))
-            const Text('Hosting private groups requires NFC sharing support.'),
           const SizedBox(height: 12),
         ],
         FilledButton(
@@ -965,30 +1062,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               : null,
           child: const Text('Create a group'),
         ),
-        const SizedBox(height: 8),
-        OutlinedButton(
-          onPressed: canStart ? _findNearby : null,
-          child: const Text('Find nearby groups'),
-        ),
-        if (ready && (_capabilities?.canJoinQr ?? false))
-          OutlinedButton.icon(
-            onPressed: canStart ? _scanInvitation : null,
-            icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('Scan group QR code'),
-          ),
-        if (ready && (_capabilities?.canJoinNfc ?? false))
-          OutlinedButton.icon(
-            onPressed: canStart ? () => _nfcInvitation(sharing: false) : null,
-            icon: const Icon(Icons.nfc),
-            label: const Text('Join via NFC'),
-          ),
-        if (ready && !(_capabilities?.canJoinQr ?? false))
-          const Text(
-            'QR joining requires Android 10+. Use nearby-device discovery on this phone.',
-          ),
-        if (ready)
+        if (ready && _connection.status != GroupStatus.idle)
           TextButton(
-            onPressed: _running ? null : _disconnect,
+            onPressed: _canCancel ? _disconnect : null,
             child: Text(
               _connection.status == GroupStatus.connected
                   ? 'Disconnect'
@@ -1000,68 +1076,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             padding: EdgeInsets.symmetric(vertical: 8),
             child: LinearProgressIndicator(),
           ),
-        if (ready && !occupied) ...[
-          if (_showNearby)
-            ListenableBuilder(
-              listenable: _chat,
-              builder: (context, _) {
-                final remembered = _chat.rememberedPrivateGroup;
-                if (remembered == null) return const SizedBox.shrink();
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.lock_outline),
-                  title: const Text('Your private group'),
-                  subtitle: const Text(
-                    'Remembered from NFC. Availability is checked when rejoining.',
-                  ),
-                  trailing: TextButton(
-                    onPressed: canStart
-                        ? () => _run(() async {
-                            _chat.prepareJoin(invitation: remembered);
-                            await widget.connectivity.joinInvitation(
-                              remembered,
-                            );
-                          })
-                        : null,
-                    child: const Text('Rejoin'),
-                  ),
-                );
-              },
-            ),
-          const SizedBox(height: 16),
-          Text(
-            'Nearby public groups',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          if (_connection.peers.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                'No public groups listed. Enable Wi-Fi and Location, then search. First-time private joining requires NFC.',
-              ),
-            ),
-          for (final peer in _connection.peers)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(peer.name.isEmpty ? 'Nearby device' : peer.name),
-              subtitle: Text(
-                peer.isGroupOwner ? 'Public group host' : 'Public group',
-              ),
-              trailing: TextButton(
-                onPressed: canStart
-                    ? () => _run(() async {
-                        _chat.prepareJoin();
-                        await widget.connectivity.joinGroup(peer.id);
-                      })
-                    : null,
-                child: const Text('Join'),
-              ),
-            ),
-        ],
         const SizedBox(height: 20),
         const Text(
           'Offline text chat is available after connecting. '
-          'Search lists public groups and your remembered private group. New private members join by NFC.',
+          'Public groups are visible to everyone nearby; private groups allow only known contacts.',
         ),
       ],
     );
@@ -1102,7 +1120,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             constraints: const BoxConstraints(maxWidth: 560),
             child: switch (_selectedIndex) {
               0 => _buildGroupsTab(context),
-              1 => ContactsScreen(calls: _calls, embedded: true),
+              1 => ContactsScreen(
+                repository: widget.contacts,
+                calls: _calls,
+                embedded: true,
+                onUsernameChanged: _applyUsername,
+              ),
               _ => CallScreen(calls: _calls, embedded: true),
             },
           ),
@@ -1112,6 +1135,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
           setState(() => _selectedIndex = index);
+          if (index == 0) unawaited(_loadVerifiedContacts());
           if (index == 1) unawaited(_calls.refreshContacts());
         },
         destinations: const [

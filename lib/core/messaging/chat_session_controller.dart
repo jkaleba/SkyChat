@@ -44,6 +44,7 @@ class ChatSessionController extends ChangeNotifier {
   GroupInvitation? _joinCandidate;
   GroupInvitation? _rememberedPrivateGroup;
   bool _removingMember = false;
+  bool _isPrivateGroup = false;
 
   ChatStatus get status => transport.status;
   String? get selfId => transport.selfId;
@@ -60,6 +61,7 @@ class ChatSessionController extends ChangeNotifier {
   List<Participant> get members => transport.members;
   bool get canManagePrivateMembers => transport.canManagePrivateMembers;
   bool get removingMember => _removingMember;
+  bool get isPrivateGroup => _isPrivateGroup;
   GroupInvitation? get rememberedPrivateGroup => _rememberedPrivateGroup;
   MessageDelivery? deliveryFor(String messageId) =>
       transport.deliveryFor(messageId);
@@ -113,6 +115,9 @@ class ChatSessionController extends ChangeNotifier {
     required String displayName,
   }) {
     _connection = connection;
+    if (connection.status == GroupStatus.connected) {
+      _isPrivateGroup = connection.privateGroup;
+    }
     transport.displayName = displayName;
     final key = networkConnected
         ? '${connection.isHost}:${connection.hostAddress}'
@@ -148,7 +153,9 @@ class ChatSessionController extends ChangeNotifier {
       return;
     }
     if (_connection.isHost) {
-      if (_connection.privateGroup && transport.hostAdmissionToken == null) {
+      if (_connection.privateGroup &&
+          !transport.requireVerifiedContact &&
+          transport.hostAdmissionToken == null) {
         _configurationError =
             'Private group credentials are unavailable. End this group and create it again.';
         _changed();
@@ -163,6 +170,7 @@ class ChatSessionController extends ChangeNotifier {
         ),
       );
     } else {
+      transport.requireContactAuth = _connection.privateGroup;
       unawaited(
         transport.connect(
           host: _connection.hostAddress!,
@@ -187,16 +195,19 @@ class ChatSessionController extends ChangeNotifier {
     _roleChanged = false;
     _connectionKey = null;
     _sessionRole = null;
+    _isPrivateGroup = false;
     transport.resetSession();
     _changed();
   }
 
-  /// Called before creating the native group. Private admission stays out of discovery.
+  /// Called before creating the native group. Private groups require contact verification.
   String? configureGroup({required bool privateGroup}) {
     beginNewSession();
-    transport.hostAdmissionToken = privateGroup ? _newAdmissionToken() : null;
+    _isPrivateGroup = privateGroup;
+    transport.requireVerifiedContact = privateGroup;
+    transport.hostAdmissionToken = null;
     transport.invitationToken = null;
-    return transport.hostAdmissionToken;
+    return null;
   }
 
   void prepareJoin({GroupInvitation? invitation}) {
@@ -205,9 +216,13 @@ class ChatSessionController extends ChangeNotifier {
     } else {
       resumeJoining();
     }
+    if (invitation != null) {
+      _isPrivateGroup = invitation.privateGroup;
+    }
     transport.invitationToken = invitation?.admissionToken;
     _joinCandidate = invitation;
     transport.hostAdmissionToken = null;
+    transport.requireVerifiedContact = false;
   }
 
   static String _newAdmissionToken() {
@@ -228,7 +243,12 @@ class ChatSessionController extends ChangeNotifier {
     }
     final generation = _generation;
     final group = transport.groupId;
-    final previous = transport.hostAdmissionToken!;
+    final previous = transport.hostAdmissionToken;
+    if (previous == null) {
+      transport.removePrivateMember(participantId);
+      _changed();
+      return;
+    }
     final next = _newAdmissionToken();
     _removingMember = true;
     _changed();

@@ -160,12 +160,34 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
         "errorCode" to errorCode, "errorMessage" to errorMessage
     )
     private fun emit() {
-        if (status != "connected" || !isHost) nfc.stopSharing()
-        discovery?.advertise(status == "connected" && isHost && !privateGroup && wifiEnabled && permitted())
+        if (status != "connected" || !isHost || privateGroup) nfc.stopSharing()
+        val shouldAdvertise = status == "connected" && isHost && wifiEnabled && permitted()
+        val hostContactId = if (shouldAdvertise && privateGroup) {
+            try { ContactVault.open(context).crypto.id } catch (_: Exception) { null }
+        } else null
+        val hostName = if (shouldAdvertise) {
+            context.getSharedPreferences("skychat_prefs", Context.MODE_PRIVATE)
+                .getString("username", null)?.trim()?.takeIf { it.isNotEmpty() }
+        } else null
+        discovery?.advertise(
+            shouldAdvertise,
+            privateGroup = privateGroup,
+            hostContactId = hostContactId,
+            hostName = hostName
+        )
         if (attached) sink?.success(snapshot())
     }
     private fun clearError() { errorCode = null; errorMessage = null }
-    private fun clearConnection(next: String) { status = next; isHost = false; hostAddress = null }
+    private fun clearConnection(next: String) {
+        status = next
+        isHost = false
+        hostAddress = null
+        if (next == "idle") {
+            privateGroup = false
+            admissionToken = null
+            connectionSetup = null
+        }
+    }
     private fun finish(value: Any? = null) {
         operationTimeout?.let(handler::removeCallbacks)
         operationTimeout = null
@@ -310,7 +332,16 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
                 } else nfc.read(result)
             }
             "createGroup", "discoverPeers", "joinGroup", "joinInvitation", "disconnect" -> {
-                if (pending != null) {
+                if (call.method == "disconnect" && pending != null) {
+                    revision++
+                    connectionSetup = null
+                    operationTimeout?.let(handler::removeCallbacks)
+                    operationTimeout = null
+                    afterPermission = null
+                    val stale = pending
+                    pending = null
+                    stale?.error("cancelled", "Disconnected.", null)
+                } else if (pending != null) {
                     result.error("busy", "Another request is in progress.", null); return
                 }
                 if (!supported || manager == null) {
@@ -325,9 +356,9 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
                     val isPrivate = args?.get("privateGroup") == true
                     val secret = args?.get("admissionToken") as? String
                     if (args?.get("privateGroup") !is Boolean ||
-                        (isPrivate && (secret == null || !secret.matches(Regex("[0-9a-f]{64}")) || !nfc.canShare)) ||
+                        (secret != null && !secret.matches(Regex("[0-9a-f]{64}"))) ||
                         (!isPrivate && secret != null)) {
-                        result.error("invalid_group", "Private groups require NFC sharing support and valid admission credentials.", null); return
+                        result.error("invalid_group", "Invalid group configuration.", null); return
                     }
                     privateGroup = isPrivate
                     admissionToken = secret
@@ -335,6 +366,9 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
                 if (call.method == "joinGroup" && peers.none { it["id"] == peerId }) {
                     result.error("invalid_peer", "Discover devices again and select a nearby device.", null); return
                 }
+                val joinPrivateGroup = if (call.method == "joinGroup") {
+                    peers.firstOrNull { it["id"] == peerId }?.get("privateGroup") == true
+                } else false
                 var invitationConfig: WifiP2pConfig? = null
                 if (call.method == "joinInvitation") {
                     if (Build.VERSION.SDK_INT < 29) {
@@ -363,7 +397,7 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
                         result.error("invalid_invitation", "Invalid group credentials.", null); return
                     }
                 }
-                if (call.method == "joinGroup") { privateGroup = false; admissionToken = null }
+                if (call.method == "joinGroup") { privateGroup = joinPrivateGroup; admissionToken = null }
                 pending = result
                 clearError()
                 val run = { execute(call.method, peerId, invitationConfig) }
@@ -427,6 +461,7 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
             if (token == revision && pending != null) {
                 revision++ // Ignore late callbacks belonging to this timed-out request.
                 if (method == "discoverPeers") discovery?.stopSearch()
+                else if (method == "disconnect") try { mgr.removeGroup(ch, null) } catch (_: RuntimeException) {}
                 else try { mgr.cancelConnect(ch, null) } catch (_: RuntimeException) {}
                 Log.d("OfflineConnection", "$method action timed out")
                 clearConnection("idle")
@@ -515,8 +550,15 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
             }
             "disconnect" -> {
                 nfc.cancel()
+                connectionSetup = null
+                discovery?.advertise(false)
+                discovery?.stopSearch(stopNativeDiscovery = true)
+                try { mgr.stopPeerDiscovery(ch, null) } catch (_: RuntimeException) {}
+                try { mgr.clearLocalServices(ch, null) } catch (_: RuntimeException) {}
+                try { mgr.clearServiceRequests(ch, null) } catch (_: RuntimeException) {}
+                val wasConnecting = status == "connecting"
                 status = "disconnecting"; emit()
-                fun removeExistingGroup() {
+                fun attemptRemoveGroup(retriesLeft: Int) {
                     if (!attached || token != revision) return
                     guarded {
                         mgr.requestGroupInfo(ch) { group ->
@@ -531,9 +573,19 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
                                         }
                                     }
                                     override fun onFailure(reason: Int) {
-                                        if (attached && token == revision) {
-                                            fail(reasonCode(reason), reasonMessage(reason))
-                                            readConnection()
+                                        if (!attached || token != revision) return
+                                        if (retriesLeft > 0) {
+                                            handler.postDelayed({ attemptRemoveGroup(retriesLeft - 1) }, 350)
+                                        } else {
+                                            mgr.requestGroupInfo(ch) { remaining ->
+                                                if (!attached || token != revision) return@requestGroupInfo
+                                                if (remaining == null) {
+                                                    peers = emptyList(); clearConnection("idle"); finish(); emit()
+                                                } else {
+                                                    fail(reasonCode(reason), reasonMessage(reason))
+                                                    readConnection()
+                                                }
+                                            }
                                         }
                                     }
                                 })
@@ -541,19 +593,14 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
                         }
                     }
                 }
-                val cancel = {
-                    if (attached && token == revision) guarded {
-                        mgr.cancelConnect(ch, object : WifiP2pManager.ActionListener {
-                            override fun onSuccess() = removeExistingGroup()
-                            override fun onFailure(reason: Int) = removeExistingGroup()
-                        })
-                    }
+                if (wasConnecting) {
+                    try { mgr.cancelConnect(ch, null) } catch (_: RuntimeException) {}
                 }
-                cancel()
+                attemptRemoveGroup(1)
             }
           } }
         }
-        if (method == "discoverPeers") issueAction()
+        if (method == "discoverPeers" || method == "disconnect") issueAction()
         else if (method == "joinGroup") {
             discovery?.stopSearch(stopNativeDiscovery = false)
             issueAction()

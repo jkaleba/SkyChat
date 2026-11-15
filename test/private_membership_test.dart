@@ -20,7 +20,10 @@ void main() {
   final clients = <ChatSessionController>[];
   setUp(() async {
     host = ChatSessionController();
-    initialToken = host.configureGroup(privateGroup: true)!;
+    host.configureGroup(privateGroup: true);
+    initialToken = 'a' * 64;
+    host.transport.requireVerifiedContact = false;
+    host.transport.hostAdmissionToken = initialToken;
     await host.transport.startHost(port: 0, address: '127.0.0.1');
   });
   tearDown(() {

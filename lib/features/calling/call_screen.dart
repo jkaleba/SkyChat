@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import '../../core/calling/call_controller.dart';
 
 class CallScreen extends StatelessWidget {
-  const CallScreen({super.key, required this.calls});
+  const CallScreen({super.key, required this.calls, this.embedded = false});
   final CallController calls;
+  final bool embedded;
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: calls,
-    builder: (context, _) => Scaffold(
-      appBar: AppBar(title: const Text('Voice call')),
-      body: ListView(
+    builder: (context, _) {
+      final body = ListView(
         padding: const EdgeInsets.all(24),
         children: [
           const Icon(Icons.account_circle, size: 88),
@@ -81,19 +81,25 @@ class CallScreen extends StatelessWidget {
           if (calls.hasCall) ...[
             const SizedBox(height: 16),
             const Text(
-              'Keep Messenger open. Leaving the app ends this call. You can return to chat while talking.',
+              'Keep SkyChat open. Leaving the app ends this call. You can return to chat while talking.',
             ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Back to Messenger'),
-            ),
-          ] else
+            if (!embedded)
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Back to SkyChat'),
+              ),
+          ] else if (!embedded)
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Close'),
             ),
         ],
-      ),
-    ),
+      );
+      if (embedded) return body;
+      return Scaffold(
+        appBar: AppBar(title: const Text('Voice call')),
+        body: body,
+      );
+    },
   );
 }

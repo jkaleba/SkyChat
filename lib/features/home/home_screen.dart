@@ -37,8 +37,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _modeSelected = false;
   bool _showNearby = false;
   bool _disconnectingRevoked = false;
+  int _selectedIndex = 0;
+  final ValueNotifier<int> _uiRevision = ValueNotifier<int>(0);
   late final ChatSessionController _chat;
   final _displayName = TextEditingController(text: 'Guest');
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _uiRevision.value++;
+  }
 
   @override
   void initState() {
@@ -76,6 +84,63 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       MaterialPageRoute<void>(builder: (_) => ContactsScreen(calls: _calls)),
     );
     if (mounted) await _calls.refreshContacts();
+  }
+
+  void _openChat() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          chat: _chat,
+          openContacts: _capabilities?.platform == 'android'
+              ? _openContacts
+              : null,
+          openCall: _openCall,
+          removePrivateMember: _removePrivateMember,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openCreateOrJoinGroup() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ListenableBuilder(
+          listenable: Listenable.merge([_uiRevision, _chat]),
+          builder: (context, _) => Scaffold(
+            appBar: AppBar(
+              title: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 28,
+                      height: 28,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Flexible(
+                    child: Text(
+                      'Create or join a group',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            body: SafeArea(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: _buildCreateOrJoinContent(context),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -306,337 +371,298 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _chat.removeListener(_membershipChanged);
     if (widget.chat == null) _chat.dispose();
     _displayName.dispose();
+    _uiRevision.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final ready =
-        !_loading &&
-        !_capabilityError &&
-        (_capabilities?.implementationReady ?? false) &&
-        (_capabilities?.wifiDirectSupported ?? false);
-    final occupied = {
-      GroupStatus.connecting,
-      GroupStatus.connected,
-      GroupStatus.disconnecting,
-    }.contains(_connection.status);
-    final canStart = ready && !_running && !occupied;
-    final statusText = switch (_connection.status) {
-      GroupStatus.idle => 'Not connected',
-      GroupStatus.discovering => 'Searching for nearby devices',
-      GroupStatus.connecting => 'Connecting — accept any system invitation',
-      GroupStatus.connected =>
-        _connection.isHost
-            ? 'Connected · You are the host'
-            : 'Connected · Participant',
-      GroupStatus.disconnecting => 'Disconnecting',
-      GroupStatus.unavailable => 'Wi-Fi Direct unavailable',
-    };
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Offline Group Messenger'),
-        actions: [
-          IconButton(
-            tooltip: 'Contacts',
-            icon: const Icon(Icons.contacts),
-            onPressed: _capabilities?.platform == 'android'
-                ? _openContacts
-                : null,
+  bool get _ready =>
+      !_loading &&
+      !_capabilityError &&
+      (_capabilities?.implementationReady ?? false) &&
+      (_capabilities?.wifiDirectSupported ?? false);
+
+  bool get _occupied => {
+    GroupStatus.connecting,
+    GroupStatus.connected,
+    GroupStatus.disconnecting,
+  }.contains(_connection.status);
+
+  bool get _canStart => _ready && !_running && !_occupied;
+
+  String get _statusText => switch (_connection.status) {
+    GroupStatus.idle => 'Not connected',
+    GroupStatus.discovering => 'Searching for nearby devices',
+    GroupStatus.connecting => 'Connecting — accept any system invitation',
+    GroupStatus.connected =>
+      _connection.isHost
+          ? 'Connected · You are the host'
+          : 'Connected · Participant',
+    GroupStatus.disconnecting => 'Disconnecting',
+    GroupStatus.unavailable => 'Wi-Fi Direct unavailable',
+  };
+
+  Widget _buildGroupsTab(BuildContext context) {
+    final ready = _ready;
+    final occupied = _occupied;
+    final canStart = _canStart;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+              child: const Icon(Icons.add),
+            ),
+            title: const Text('Create or join a group'),
+            subtitle: const Text(
+              'Start a private or public group, scan QR, or tap NFC',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _openCreateOrJoinGroup,
           ),
-          IconButton(
-            tooltip: 'Current call',
-            icon: const Icon(Icons.call),
-            onPressed: _openCall,
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: ListView(
-              padding: const EdgeInsets.all(24),
-              children: [
-                Text(
-                  'Connect your group',
-                  style: Theme.of(context).textTheme.headlineLarge,
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Create a private group and invite people by NFC tap, or make a public group discoverable nearby.',
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _displayName,
-                  enabled: !occupied && !_running,
-                  maxLength: 32,
-                  decoration: const InputDecoration(
-                    labelText: 'Your chat name',
-                  ),
-                ),
-                if (_connection.status == GroupStatus.connected ||
-                    _chat.hasConversation)
-                  ListenableBuilder(
-                    listenable: _chat,
-                    builder: (context, _) => OutlinedButton.icon(
-                      icon: const Icon(Icons.chat_bubble_outline),
-                      label: Text(
-                        _chat.status == ChatStatus.ready
-                            ? 'Open chat'
-                            : 'Open chat / connection status',
-                      ),
-                      onPressed: () => Navigator.of(context).push<void>(
-                        MaterialPageRoute(
-                          builder: (_) => ChatScreen(
-                            chat: _chat,
-                            openContacts: _capabilities?.platform == 'android'
-                                ? _openContacts
-                                : null,
-                            openCall: _openCall,
-                            removePrivateMember: _removePrivateMember,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                if (ready &&
-                    _connection.status == GroupStatus.connected &&
-                    _connection.isHost) ...[
-                  if (_capabilities?.canShareNfc ?? false)
-                    OutlinedButton.icon(
-                      onPressed: _running
-                          ? null
-                          : () => _nfcInvitation(sharing: true),
-                      icon: const Icon(Icons.nfc),
-                      label: const Text('Share via NFC'),
-                    ),
-                  if (!_connection.privateGroup)
-                    OutlinedButton.icon(
-                      onPressed: _running ? null : _showInvitation,
-                      icon: const Icon(Icons.qr_code),
-                      label: const Text('Show group QR code'),
-                    ),
-                  if (_invitation != null && !_connection.privateGroup) ...[
-                    const SizedBox(height: 12),
-                    Center(
-                      child: Semantics(
-                        label: 'Group invitation QR code',
-                        child: ExcludeSemantics(
-                          child: QrImageView(
-                            data: _invitation!.encode(),
-                            size: 240,
-                            padding: const EdgeInsets.all(16),
-                            backgroundColor: Colors.white,
-                            eyeStyle: const QrEyeStyle(
-                              eyeShape: QrEyeShape.square,
-                              color: Colors.black,
-                            ),
-                            dataModuleStyle: const QrDataModuleStyle(
-                              dataModuleShape: QrDataModuleShape.square,
-                              color: Colors.black,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const Text(
-                      'Only show this code to people joining your group. It contains the Wi-Fi password.',
-                    ),
-                    TextButton(
-                      onPressed: () => setState(() {
-                        _invitation = null;
-                      }),
-                      child: const Text('Hide QR code'),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                ],
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          ready ? statusText : 'Device support',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        if (_loading)
-                          const Text('Checking device support...')
-                        else if (_capabilities != null)
-                          Text(_capabilities!.description),
-                        if (ready) ...[
-                          if (_connection.status == GroupStatus.connected)
-                            Text(
-                              _connection.privateGroup
-                                  ? 'Private group · NFC invitations only'
-                                  : 'Public group',
-                            ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _connection.wifiEnabled
-                                ? 'Wi-Fi enabled'
-                                : 'Enable Wi-Fi in system settings.',
-                          ),
-                          if (!_connection.permissionGranted)
-                            const Text(
-                              'Your first action will ask for Nearby devices or Location permission.',
-                            ),
-                          if (_connection.status == GroupStatus.connected &&
-                              _connection.hostAddress != null)
-                            SelectableText(
-                              'Host IP: ${_connection.hostAddress}',
-                            ),
-                        ],
-                        if (_error != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            _error!,
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: _running ? null : _load,
-                            child: const Text('Try again'),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (ready && !occupied) ...[
-                  SegmentedButton<bool>(
-                    segments: [
-                      ButtonSegment(
-                        value: true,
-                        label: const Text('Private'),
-                        icon: const Icon(Icons.nfc),
-                        enabled: _capabilities?.canShareNfc ?? false,
-                      ),
-                      const ButtonSegment(
-                        value: false,
-                        label: Text('Public'),
-                        icon: Icon(Icons.public),
-                      ),
-                    ],
-                    selected: {_privateMode},
-                    onSelectionChanged: _running
-                        ? null
-                        : (selection) => setState(() {
-                            _privateMode = selection.single;
-                            _modeSelected = true;
-                          }),
-                  ),
-                  const SizedBox(height: 8),
+        ),
+        if (!_ready || _error != null || _connection.status != GroupStatus.idle)
+          Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    _privateMode
-                        ? 'Invite by NFC tap only. Not listed in this app’s discovery. The Wi-Fi signal remains detectable; chat is not yet encrypted.'
-                        : 'Listed for nearby app users. Join through discovery, QR or NFC. Chat is not yet encrypted.',
-                  ),
-                  if (!(_capabilities?.canShareNfc ?? false))
-                    const Text(
-                      'Hosting private groups requires NFC sharing support.',
-                    ),
-                  const SizedBox(height: 12),
-                ],
-                FilledButton(
-                  onPressed: canStart
-                      ? () => _run(() async {
-                          final token = _chat.configureGroup(
-                            privateGroup: _privateMode,
-                          );
-                          await widget.connectivity.createGroup(
-                            privateGroup: _privateMode,
-                            admissionToken: token,
-                          );
-                        })
-                      : null,
-                  child: const Text('Create a group'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: canStart ? _findNearby : null,
-                  child: const Text('Find nearby groups'),
-                ),
-                if (ready && (_capabilities?.canJoinQr ?? false))
-                  OutlinedButton.icon(
-                    onPressed: canStart ? _scanInvitation : null,
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('Scan group QR code'),
-                  ),
-                if (ready && (_capabilities?.canJoinNfc ?? false))
-                  OutlinedButton.icon(
-                    onPressed: canStart
-                        ? () => _nfcInvitation(sharing: false)
-                        : null,
-                    icon: const Icon(Icons.nfc),
-                    label: const Text('Join via NFC'),
-                  ),
-                if (ready && !(_capabilities?.canJoinQr ?? false))
-                  const Text(
-                    'QR joining requires Android 10+. Use nearby-device discovery on this phone.',
-                  ),
-                if (ready)
-                  TextButton(
-                    onPressed: _running ? null : _disconnect,
-                    child: Text(
-                      _connection.status == GroupStatus.connected
-                          ? 'Disconnect'
-                          : 'Cancel / stop discovery',
-                    ),
-                  ),
-                if (_running)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: LinearProgressIndicator(),
-                  ),
-                if (ready && !occupied) ...[
-                  if (_showNearby)
-                    ListenableBuilder(
-                      listenable: _chat,
-                      builder: (context, _) {
-                        final remembered = _chat.rememberedPrivateGroup;
-                        if (remembered == null) return const SizedBox.shrink();
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.lock_outline),
-                          title: const Text('Your private group'),
-                          subtitle: const Text(
-                            'Remembered from NFC. Availability is checked when rejoining.',
-                          ),
-                          trailing: TextButton(
-                            onPressed: canStart
-                                ? () => _run(() async {
-                                    _chat.prepareJoin(invitation: remembered);
-                                    await widget.connectivity.joinInvitation(
-                                      remembered,
-                                    );
-                                  })
-                                : null,
-                            child: const Text('Rejoin'),
-                          ),
-                        );
-                      },
-                    ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Nearby public groups',
+                    ready ? _statusText : 'Device support',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  if (_connection.peers.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text(
-                        'No public groups listed. Enable Wi-Fi and Location, then search. First-time private joining requires NFC.',
+                  const SizedBox(height: 6),
+                  if (_loading)
+                    const Text('Checking device support...')
+                  else if (_capabilities != null && !ready)
+                    Text(_capabilities!.description),
+                  if (ready && _connection.status == GroupStatus.connected) ...[
+                    Text(
+                      _connection.privateGroup
+                          ? 'Private group · NFC invitations only'
+                          : 'Public group',
+                    ),
+                    if (_connection.hostAddress != null) ...[
+                      const SizedBox(height: 4),
+                      SelectableText('Host IP: ${_connection.hostAddress}'),
+                    ],
+                  ],
+                  if (_error != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
                       ),
                     ),
-                  for (final peer in _connection.peers)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
+                    TextButton(
+                      onPressed: _running ? null : _load,
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                  if (ready &&
+                      _connection.status == GroupStatus.connected &&
+                      _connection.isHost) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (_capabilities?.canShareNfc ?? false)
+                          OutlinedButton.icon(
+                            onPressed: _running
+                                ? null
+                                : () => _nfcInvitation(sharing: true),
+                            icon: const Icon(Icons.nfc),
+                            label: const Text('Share via NFC'),
+                          ),
+                        if (!_connection.privateGroup)
+                          OutlinedButton.icon(
+                            onPressed: _running ? null : _showInvitation,
+                            icon: const Icon(Icons.qr_code),
+                            label: const Text('Show group QR code'),
+                          ),
+                      ],
+                    ),
+                    if (_invitation != null && !_connection.privateGroup) ...[
+                      const SizedBox(height: 12),
+                      Center(
+                        child: Semantics(
+                          label: 'Group invitation QR code',
+                          child: ExcludeSemantics(
+                            child: QrImageView(
+                              data: _invitation!.encode(),
+                              size: 240,
+                              padding: const EdgeInsets.all(16),
+                              backgroundColor: Colors.white,
+                              eyeStyle: const QrEyeStyle(
+                                eyeShape: QrEyeShape.square,
+                                color: Colors.black,
+                              ),
+                              dataModuleStyle: const QrDataModuleStyle(
+                                dataModuleShape: QrDataModuleShape.square,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Text(
+                        'Only show this code to people joining your group. It contains the Wi-Fi password.',
+                      ),
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _invitation = null;
+                        }),
+                        child: const Text('Hide QR code'),
+                      ),
+                    ],
+                  ],
+                  if (ready && _connection.status != GroupStatus.idle)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _running ? null : _disconnect,
+                        child: Text(
+                          _connection.status == GroupStatus.connected
+                              ? 'Disconnect'
+                              : 'Cancel / stop discovery',
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        if (_connection.status == GroupStatus.connected ||
+            _chat.hasConversation)
+          ListenableBuilder(
+            listenable: _chat,
+            builder: (context, _) {
+              final messages = _chat.messages;
+              final lastText = messages.isNotEmpty
+                  ? '${messages.last.message.senderName}: ${messages.last.message.text}'
+                  : (_connection.privateGroup
+                        ? 'Private group · Tap to open chat'
+                        : 'Public group · Tap to open chat');
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    child: Icon(
+                      _connection.privateGroup ? Icons.lock : Icons.groups,
+                    ),
+                  ),
+                  title: Text(
+                    _connection.privateGroup
+                        ? 'Current private group'
+                        : 'Current public group',
+                  ),
+                  subtitle: Text(
+                    lastText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: const Icon(Icons.chat_bubble_outline),
+                  onTap: _openChat,
+                ),
+              );
+            },
+          ),
+        if (_connection.status == GroupStatus.connected ||
+            _chat.hasConversation)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ListenableBuilder(
+              listenable: _chat,
+              builder: (context, _) => OutlinedButton.icon(
+                icon: const Icon(Icons.chat_bubble_outline),
+                label: Text(
+                  _chat.status == ChatStatus.ready
+                      ? 'Open chat'
+                      : 'Open chat / connection status',
+                ),
+                onPressed: _openChat,
+              ),
+            ),
+          ),
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            Text(
+              'Available groups',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            TextButton.icon(
+              onPressed: canStart ? _findNearby : null,
+              icon: const Icon(Icons.search),
+              label: const Text('Find nearby groups'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_running)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: LinearProgressIndicator(),
+          ),
+        ListenableBuilder(
+          listenable: _chat,
+          builder: (context, _) {
+            final remembered = (!occupied && ready)
+                ? _chat.rememberedPrivateGroup
+                : null;
+            final peers = (!occupied && ready)
+                ? _connection.peers
+                : const <NearbyPeer>[];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (remembered != null)
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.lock_outline),
+                      ),
+                      title: const Text('Your private group'),
+                      subtitle: const Text(
+                        'Remembered from NFC. Availability is checked when rejoining.',
+                      ),
+                      trailing: TextButton(
+                        onPressed: canStart
+                            ? () => _run(() async {
+                                _chat.prepareJoin(invitation: remembered);
+                                await widget.connectivity.joinInvitation(
+                                  remembered,
+                                );
+                              })
+                            : null,
+                        child: const Text('Rejoin'),
+                      ),
+                      onTap: canStart
+                          ? () => _run(() async {
+                              _chat.prepareJoin(invitation: remembered);
+                              await widget.connectivity.joinInvitation(
+                                remembered,
+                              );
+                            })
+                          : null,
+                    ),
+                  ),
+                for (final peer in peers)
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: const CircleAvatar(child: Icon(Icons.public)),
                       title: Text(
                         peer.name.isEmpty ? 'Nearby device' : peer.name,
                       ),
@@ -654,17 +680,380 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             : null,
                         child: const Text('Join'),
                       ),
+                      onTap: canStart
+                          ? () => _run(() async {
+                              _chat.prepareJoin();
+                              await widget.connectivity.joinGroup(peer.id);
+                            })
+                          : null,
                     ),
-                ],
-                const SizedBox(height: 20),
-                const Text(
-                  'Offline text chat is available after connecting. '
-                  'Search lists public groups and your remembered private group. New private members join by NFC.',
+                  ),
+                if (remembered == null && peers.isEmpty)
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: const ListTile(
+                      leading: CircleAvatar(child: Icon(Icons.wifi_tethering)),
+                      title: Text('No groups listed yet'),
+                      subtitle: Text(
+                        'Tap "Find nearby groups" to discover public groups or use "Create or join a group" above.',
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCreateOrJoinContent(BuildContext context) {
+    final ready = _ready;
+    final occupied = _occupied;
+    final canStart = _canStart;
+    final statusText = _statusText;
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        Text(
+          'Connect your group',
+          style: Theme.of(context).textTheme.headlineLarge,
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Create a private group and invite people by NFC tap, or make a public group discoverable nearby.',
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _displayName,
+          enabled: !occupied && !_running,
+          maxLength: 32,
+          decoration: const InputDecoration(labelText: 'Your chat name'),
+        ),
+        if (_connection.status == GroupStatus.connected ||
+            _chat.hasConversation)
+          ListenableBuilder(
+            listenable: _chat,
+            builder: (context, _) => OutlinedButton.icon(
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: Text(
+                _chat.status == ChatStatus.ready
+                    ? 'Open chat'
+                    : 'Open chat / connection status',
+              ),
+              onPressed: _openChat,
+            ),
+          ),
+        if (ready &&
+            _connection.status == GroupStatus.connected &&
+            _connection.isHost) ...[
+          if (_capabilities?.canShareNfc ?? false)
+            OutlinedButton.icon(
+              onPressed: _running ? null : () => _nfcInvitation(sharing: true),
+              icon: const Icon(Icons.nfc),
+              label: const Text('Share via NFC'),
+            ),
+          if (!_connection.privateGroup)
+            OutlinedButton.icon(
+              onPressed: _running ? null : _showInvitation,
+              icon: const Icon(Icons.qr_code),
+              label: const Text('Show group QR code'),
+            ),
+          if (_invitation != null && !_connection.privateGroup) ...[
+            const SizedBox(height: 12),
+            Center(
+              child: Semantics(
+                label: 'Group invitation QR code',
+                child: ExcludeSemantics(
+                  child: QrImageView(
+                    data: _invitation!.encode(),
+                    size: 240,
+                    padding: const EdgeInsets.all(16),
+                    backgroundColor: Colors.white,
+                    eyeStyle: const QrEyeStyle(
+                      eyeShape: QrEyeShape.square,
+                      color: Colors.black,
+                    ),
+                    dataModuleStyle: const QrDataModuleStyle(
+                      dataModuleShape: QrDataModuleShape.square,
+                      color: Colors.black,
+                    ),
+                  ),
                 ),
+              ),
+            ),
+            const Text(
+              'Only show this code to people joining your group. It contains the Wi-Fi password.',
+            ),
+            TextButton(
+              onPressed: () => setState(() {
+                _invitation = null;
+              }),
+              child: const Text('Hide QR code'),
+            ),
+          ],
+          const SizedBox(height: 12),
+        ],
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ready ? statusText : 'Device support',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                if (_loading)
+                  const Text('Checking device support...')
+                else if (_capabilities != null)
+                  Text(_capabilities!.description),
+                if (ready) ...[
+                  if (_connection.status == GroupStatus.connected)
+                    Text(
+                      _connection.privateGroup
+                          ? 'Private group · NFC invitations only'
+                          : 'Public group',
+                    ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _connection.wifiEnabled
+                        ? 'Wi-Fi enabled'
+                        : 'Enable Wi-Fi in system settings.',
+                  ),
+                  if (!_connection.permissionGranted)
+                    const Text(
+                      'Your first action will ask for Nearby devices or Location permission.',
+                    ),
+                  if (_connection.status == GroupStatus.connected &&
+                      _connection.hostAddress != null)
+                    SelectableText('Host IP: ${_connection.hostAddress}'),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _running ? null : _load,
+                    child: const Text('Try again'),
+                  ),
+                ],
               ],
             ),
           ),
         ),
+        const SizedBox(height: 16),
+        if (ready && !occupied) ...[
+          SegmentedButton<bool>(
+            segments: [
+              ButtonSegment(
+                value: true,
+                label: const Text('Private'),
+                icon: const Icon(Icons.nfc),
+                enabled: _capabilities?.canShareNfc ?? false,
+              ),
+              const ButtonSegment(
+                value: false,
+                label: Text('Public'),
+                icon: Icon(Icons.public),
+              ),
+            ],
+            selected: {_privateMode},
+            onSelectionChanged: _running
+                ? null
+                : (selection) => setState(() {
+                    _privateMode = selection.single;
+                    _modeSelected = true;
+                  }),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _privateMode
+                ? 'Invite by NFC tap only. Not listed in this app’s discovery. The Wi-Fi signal remains detectable; chat is not yet encrypted.'
+                : 'Listed for nearby app users. Join through discovery, QR or NFC. Chat is not yet encrypted.',
+          ),
+          if (!(_capabilities?.canShareNfc ?? false))
+            const Text('Hosting private groups requires NFC sharing support.'),
+          const SizedBox(height: 12),
+        ],
+        FilledButton(
+          onPressed: canStart
+              ? () => _run(() async {
+                  final token = _chat.configureGroup(
+                    privateGroup: _privateMode,
+                  );
+                  await widget.connectivity.createGroup(
+                    privateGroup: _privateMode,
+                    admissionToken: token,
+                  );
+                })
+              : null,
+          child: const Text('Create a group'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: canStart ? _findNearby : null,
+          child: const Text('Find nearby groups'),
+        ),
+        if (ready && (_capabilities?.canJoinQr ?? false))
+          OutlinedButton.icon(
+            onPressed: canStart ? _scanInvitation : null,
+            icon: const Icon(Icons.qr_code_scanner),
+            label: const Text('Scan group QR code'),
+          ),
+        if (ready && (_capabilities?.canJoinNfc ?? false))
+          OutlinedButton.icon(
+            onPressed: canStart ? () => _nfcInvitation(sharing: false) : null,
+            icon: const Icon(Icons.nfc),
+            label: const Text('Join via NFC'),
+          ),
+        if (ready && !(_capabilities?.canJoinQr ?? false))
+          const Text(
+            'QR joining requires Android 10+. Use nearby-device discovery on this phone.',
+          ),
+        if (ready)
+          TextButton(
+            onPressed: _running ? null : _disconnect,
+            child: Text(
+              _connection.status == GroupStatus.connected
+                  ? 'Disconnect'
+                  : 'Cancel / stop discovery',
+            ),
+          ),
+        if (_running)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: LinearProgressIndicator(),
+          ),
+        if (ready && !occupied) ...[
+          if (_showNearby)
+            ListenableBuilder(
+              listenable: _chat,
+              builder: (context, _) {
+                final remembered = _chat.rememberedPrivateGroup;
+                if (remembered == null) return const SizedBox.shrink();
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.lock_outline),
+                  title: const Text('Your private group'),
+                  subtitle: const Text(
+                    'Remembered from NFC. Availability is checked when rejoining.',
+                  ),
+                  trailing: TextButton(
+                    onPressed: canStart
+                        ? () => _run(() async {
+                            _chat.prepareJoin(invitation: remembered);
+                            await widget.connectivity.joinInvitation(
+                              remembered,
+                            );
+                          })
+                        : null,
+                    child: const Text('Rejoin'),
+                  ),
+                );
+              },
+            ),
+          const SizedBox(height: 16),
+          Text(
+            'Nearby public groups',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          if (_connection.peers.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'No public groups listed. Enable Wi-Fi and Location, then search. First-time private joining requires NFC.',
+              ),
+            ),
+          for (final peer in _connection.peers)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(peer.name.isEmpty ? 'Nearby device' : peer.name),
+              subtitle: Text(
+                peer.isGroupOwner ? 'Public group host' : 'Public group',
+              ),
+              trailing: TextButton(
+                onPressed: canStart
+                    ? () => _run(() async {
+                        _chat.prepareJoin();
+                        await widget.connectivity.joinGroup(peer.id);
+                      })
+                    : null,
+                child: const Text('Join'),
+              ),
+            ),
+        ],
+        const SizedBox(height: 20),
+        const Text(
+          'Offline text chat is available after connecting. '
+          'Search lists public groups and your remembered private group. New private members join by NFC.',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'assets/images/logo.png',
+                width: 28,
+                height: 28,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Flexible(
+              child: Text('SkyChat', overflow: TextOverflow.ellipsis),
+            ),
+          ],
+        ),
+      ),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: switch (_selectedIndex) {
+              0 => _buildGroupsTab(context),
+              1 => ContactsScreen(calls: _calls, embedded: true),
+              _ => CallScreen(calls: _calls, embedded: true),
+            },
+          ),
+        ),
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) {
+          setState(() => _selectedIndex = index);
+          if (index == 1) unawaited(_calls.refreshContacts());
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.groups_outlined),
+            selectedIcon: Icon(Icons.groups),
+            label: 'Groups',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.contacts_outlined),
+            selectedIcon: Icon(Icons.contacts),
+            label: 'Contacts',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.call_outlined),
+            selectedIcon: Icon(Icons.call),
+            label: 'Calls',
+          ),
+        ],
       ),
     );
   }

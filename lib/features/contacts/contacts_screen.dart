@@ -8,9 +8,11 @@ class ContactsScreen extends StatefulWidget {
     super.key,
     this.repository = const ContactRepository(),
     this.calls,
+    this.embedded = false,
   });
   final ContactRepository repository;
   final CallController? calls;
+  final bool embedded;
   @override
   State<ContactsScreen> createState() => _ContactsScreenState();
 }
@@ -137,35 +139,44 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Contacts'),
-      actions: [
-        IconButton(
-          onPressed: busy ? null : load,
-          tooltip: 'Refresh contacts',
-          icon: const Icon(Icons.refresh),
-        ),
-        IconButton(
-          tooltip: 'Reset contact identity',
-          icon: const Icon(Icons.delete_forever),
-          onPressed: busy
-              ? null
-              : () async {
-                  if (await confirm(
-                        'Reset all contacts?',
-                        'Deletes your contact identity and all saved contacts. Everyone must pair with you by NFC again.',
-                      ) &&
-                      mounted) {
-                    await run(widget.repository.reset);
-                  }
-                },
-        ),
-      ],
-    ),
-    body: ListView(
+  Widget build(BuildContext context) {
+    final actions = [
+      IconButton(
+        onPressed: busy ? null : load,
+        tooltip: 'Refresh contacts',
+        icon: const Icon(Icons.refresh),
+      ),
+      IconButton(
+        tooltip: 'Reset contact identity',
+        icon: const Icon(Icons.delete_forever),
+        onPressed: busy
+            ? null
+            : () async {
+                if (await confirm(
+                      'Reset all contacts?',
+                      'Deletes your contact identity and all saved contacts. Everyone must pair with you by NFC again.',
+                    ) &&
+                    mounted) {
+                  await run(widget.repository.reset);
+                }
+              },
+      ),
+    ];
+    final body = ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (widget.embedded)
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Contacts',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+              ),
+              ...actions,
+            ],
+          ),
         if (error != null)
           Text(
             error!,
@@ -236,8 +247,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
             ),
           ),
       ],
-    ),
-  );
+    );
+    if (widget.embedded) return body;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Contacts'), actions: actions),
+      body: body,
+    );
+  }
 }
 
 class ContactPairingScreen extends StatefulWidget {

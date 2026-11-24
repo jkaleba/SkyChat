@@ -4,6 +4,10 @@
 
 For detailed architecture, setup instructions, and the original project description, see [description.md](description.md).
 
+For the technologies, NFC payloads, Wi-Fi Direct setup, private authentication,
+chat and call flows, see the [implementation guide](docs/implementation-guide.md).
+The [source map](docs/source-map.md) lists the files and methods for each feature.
+
 ## Weekly Updates
 
 ### Week 1

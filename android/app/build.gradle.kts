@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.offlinegroupmessenger.offline_group_messenger"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "28.2.13676358"
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

@@ -8,11 +8,18 @@ plugins {
 android {
     namespace = "com.offlinegroupmessenger.offline_group_messenger"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    packaging {
+        resources {
+            // Bouncy Castle artifacts each include this license resource.
+            merges += "META-INF/LICENSE.md"
+        }
     }
 
     defaultConfig {

@@ -8,6 +8,12 @@ For the technologies, NFC payloads, Wi-Fi Direct setup, private authentication,
 chat and call flows, see the [implementation guide](docs/implementation-guide.md).
 The [source map](docs/source-map.md) lists the files and methods for each feature.
 
+Private groups now use one-time NFC contact verification, anonymous nearby group
+labels, explicit host approval and contact-authenticated TLS 1.3, including resume
+tokens. Both phones need this build. Group text is encrypted to the host, which
+forwards messages; physical-phone acceptance remains pending. See
+[private group security](docs/private-group-security.md).
+
 ## Weekly Updates
 
 ### Week 1

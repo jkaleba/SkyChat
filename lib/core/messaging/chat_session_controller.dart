@@ -62,6 +62,8 @@ class ChatSessionController extends ChangeNotifier {
   bool get canManagePrivateMembers => transport.canManagePrivateMembers;
   bool get removingMember => _removingMember;
   bool get isPrivateGroup => _isPrivateGroup;
+  bool get waitingForApproval => transport.waitingForApproval;
+  List<PrivateJoinRequest> get joinRequests => transport.joinRequests;
   GroupInvitation? get rememberedPrivateGroup => _rememberedPrivateGroup;
   MessageDelivery? deliveryFor(String messageId) =>
       transport.deliveryFor(messageId);

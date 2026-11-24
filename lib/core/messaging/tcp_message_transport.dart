@@ -10,6 +10,7 @@ import '../models/chat_message.dart';
 import '../models/message_delivery.dart';
 import '../models/participant.dart';
 import 'message_transport.dart';
+import 'private_channel.dart';
 
 enum ChatStatus { offline, connecting, ready }
 
@@ -20,24 +21,51 @@ class _Identity {
   bool revoked = false;
 }
 
+class PrivateJoinRequest {
+  const PrivateJoinRequest(this.id, this.contactId, this.name);
+  final String id;
+  final String contactId;
+  final String name;
+}
+
+class _PendingAdmission {
+  _PendingAdmission(this.request, this.frame, this.after);
+  final PrivateJoinRequest request;
+  final Map<String, dynamic> frame;
+  final int after;
+  Timer? timeout;
+}
+
 /// Foreground, in-memory protocol v3. Resume tokens are NOT authenticated identity.
 class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   TcpMessageTransport({
     this.confirmationTimeout = const Duration(seconds: 6),
     this.callCapable = true,
     ContactRepository contacts = const ContactRepository(),
-    this.signContactAuth,
-    this.verifyContactAuth,
   }) : _contacts = contacts;
   final ContactRepository _contacts;
-  Future<String> Function(String hostContactId, String nonce)? signContactAuth;
-  Future<String> Function(String token, String nonce)? verifyContactAuth;
   bool requireVerifiedContact = false;
   bool requireContactAuth = false;
   String? _hostContactId;
   String? _selfContactId;
   final _challenges = <Socket, String>{};
   bool _awaitingChallenge = false;
+  SecurityContext? _privateContext;
+  String? _privateCertificate;
+  String? _clientChallenge;
+  String? _pinnedHostContactId;
+  bool _authenticatedPrivateHost = false;
+  bool _waitingForApproval = false;
+  final _handshaking = <Socket>{};
+  final _authenticating = <Socket>{};
+  final _admissions = <Socket, _PendingAdmission>{};
+  final _approvedContacts = <String>{};
+  bool get waitingForApproval => _waitingForApproval;
+  bool get privateChannelAuthenticated =>
+      (requireVerifiedContact && _privateContext != null) ||
+      (requireContactAuth && _authenticatedPrivateHost);
+  List<PrivateJoinRequest> get joinRequests =>
+      List.unmodifiable(_admissions.values.map((p) => p.request));
   final bool callCapable;
   bool _callRelay = false;
   String? hostId;
@@ -139,6 +167,10 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     selfId = null;
     _groupId = null;
     _resumeToken = null;
+    _selfContactId = null;
+    _hostContactId = null;
+    _pinnedHostContactId = null;
+    _approvedContacts.clear();
     _sequence = 0;
     _nextRequest = 0;
     sessionEnded = false;
@@ -153,6 +185,8 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     error = null;
     _welcomed = false;
     _hasRoster = false;
+    _authenticatedPrivateHost = false;
+    _waitingForApproval = false;
     status = ChatStatus.connecting;
     _notify();
   }
@@ -168,6 +202,15 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     final epoch = _epoch;
     try {
       _hostContactId ??= await _loadSelfContactId();
+      if (requireVerifiedContact) {
+        if (_hostContactId == null) {
+          throw StateError('Contact identity unavailable');
+        }
+        final material = await PrivateChannel(_contacts).createHost();
+        if (epoch != _epoch) return;
+        _privateContext = material.context;
+        _privateCertificate = material.fingerprint;
+      }
       final server = await ServerSocket.bind(address, port);
       if (epoch != _epoch) {
         await server.close();
@@ -189,29 +232,15 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       status = ChatStatus.ready;
       server.listen(
         (socket) {
-          if (epoch != _epoch || _peers.length >= 15) {
+          if (epoch != _epoch || _peers.length + _handshaking.length >= 15) {
             socket.destroy();
             return;
           }
-          _peers[socket] = null;
-          _listen(socket, epoch);
           if (requireVerifiedContact) {
-            final nonce = _id();
-            _challenges[socket] = nonce;
-            _write(socket, {
-              'type': 'challenge',
-              'hostContactId': _hostContactId ?? '',
-              'nonce': nonce,
-            });
+            unawaited(_secureIncoming(socket, epoch));
+          } else {
+            _acceptSocket(socket, epoch);
           }
-          Future<void>.delayed(const Duration(seconds: 5), () {
-            if (epoch == _epoch &&
-                _peers.containsKey(socket) &&
-                _peers[socket] == null) {
-              _challenges.remove(socket);
-              _lost(socket);
-            }
-          });
         },
         onError: (Object _) {
           if (epoch == _epoch) _end('Host chat stopped. Create a new group.');
@@ -224,37 +253,86 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     }
   }
 
+  Future<void> _secureIncoming(Socket raw, int epoch) async {
+    _handshaking.add(raw);
+    try {
+      final socket =
+          await SecureSocket.secureServer(
+                raw,
+                _privateContext!,
+                supportedProtocols: [PrivateChannel.protocol],
+              )
+              .then((socket) {
+                if (epoch != _epoch || !_handshaking.contains(raw)) {
+                  socket.destroy();
+                }
+                return socket;
+              })
+              .timeout(const Duration(seconds: 5));
+      if (epoch != _epoch) {
+        socket.destroy();
+        return;
+      }
+      _acceptSocket(socket, epoch);
+    } catch (_) {
+      raw.destroy();
+    } finally {
+      _handshaking.remove(raw);
+    }
+  }
+
+  void _acceptSocket(Socket socket, int epoch) {
+    _peers[socket] = null;
+    _listen(socket, epoch);
+    Future<void>.delayed(const Duration(seconds: 8), () {
+      if (epoch == _epoch &&
+          _peers.containsKey(socket) &&
+          _peers[socket] == null &&
+          !_admissions.containsKey(socket)) {
+        _lost(socket);
+      }
+    });
+  }
+
   @override
-  Future<void> connect({
-    required String host,
-    required int port,
-  }) async {
+  Future<void> connect({required String host, required int port}) async {
     if (sessionEnded) return;
     _isHost = false;
     _prepare();
     final epoch = _epoch;
     for (var attempt = 0; attempt < 5 && epoch == _epoch; attempt++) {
       try {
-        final socket = await Socket.connect(
-          host,
-          port,
-          timeout: const Duration(seconds: 2),
-        );
+        final Socket socket = requireContactAuth
+            ? await PrivateChannel(_contacts).connect(host, port)
+            : await Socket.connect(
+                host,
+                port,
+                timeout: const Duration(seconds: 2),
+              );
         if (epoch != _epoch) {
           socket.destroy();
           return;
         }
         _host = socket;
         _awaitingChallenge = requireContactAuth;
+        if (requireContactAuth && socket is! SecureSocket) {
+          socket.destroy();
+          throw StateError('Private TLS protocol unavailable');
+        }
         _listen(socket, epoch);
-        if (!requireContactAuth) {
+        if (requireContactAuth) {
+          _clientChallenge = _id() + _id();
+          _write(socket, {'type': 'private_open', 'nonce': _clientChallenge});
+        } else {
           await _loadSelfContactId();
           if (epoch != _epoch || !identical(_host, socket)) return;
           _sendHello(socket);
         }
         _startHeartbeat();
-        Future<void>.delayed(const Duration(seconds: 5), () {
-          if (epoch == _epoch && status == ChatStatus.connecting) {
+        Future<void>.delayed(const Duration(seconds: 12), () {
+          if (epoch == _epoch &&
+              status == ChatStatus.connecting &&
+              !_waitingForApproval) {
             _fail('Host did not finish chat synchronization. Retry chat.');
           }
         });
@@ -378,25 +456,98 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     });
   }
 
-  Future<void> _respondToChallenge(
+  Future<void> _openPrivateChannel(
     Socket socket,
     Map<String, dynamic> frame,
     int epoch,
   ) async {
-    final hostContactId = _string(frame['hostContactId'], 128);
-    final nonce = _string(frame['nonce'], 128);
+    if (socket is! SecureSocket ||
+        _challenges.containsKey(socket) ||
+        !_authenticating.add(socket)) {
+      _lost(socket);
+      return;
+    }
     try {
-      await _loadSelfContactId();
-      final signer = signContactAuth ?? _contacts.signGroupAuth;
-      final token = await signer(hostContactId, nonce);
-      if (epoch != _epoch || !identical(_host, socket)) return;
-      _awaitingChallenge = false;
-      _sendHello(socket, contactAuth: token);
+      final nonce = _string(frame['nonce'], 64);
+      if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(nonce)) {
+        throw const FormatException('Invalid challenge');
+      }
+      final challenge = _id() + _id();
+      _challenges[socket] = challenge;
+      final group = _groupId!;
+      final proof = await _contacts
+          .signPrivateChannel({
+            'role': 'host',
+            'to': '',
+            'nonce': nonce,
+            'certificate': _privateCertificate!,
+            'group': group,
+          })
+          .timeout(const Duration(seconds: 4));
+      if (epoch != _epoch || !_peers.containsKey(socket)) return;
+      _write(socket, {
+        'type': 'private_host',
+        'nonce': challenge,
+        'group': group,
+        'proof': proof,
+      });
     } catch (_) {
-      if (epoch != _epoch || !identical(_host, socket)) return;
-      _end(
-        'Only known contacts can join this private group. Add each other in Contacts first.',
-      );
+      if (epoch == _epoch) _lost(socket);
+    } finally {
+      _authenticating.remove(socket);
+    }
+  }
+
+  Future<void> _authenticatePrivateHost(
+    Socket socket,
+    Map<String, dynamic> frame,
+    int epoch,
+  ) async {
+    try {
+      if (socket is! SecureSocket || socket.peerCertificate == null) {
+        throw StateError('Private TLS certificate unavailable');
+      }
+      final group = _string(frame['group'], 32);
+      final nonce = _string(frame['nonce'], 64);
+      if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(group) ||
+          !RegExp(r'^[a-f0-9]{64}$').hasMatch(nonce)) {
+        throw const FormatException('Invalid private handshake');
+      }
+      final certificate = PrivateChannel.fingerprint(socket.peerCertificate!);
+      final host = await _contacts
+          .verifyPrivateChannel(_string(frame['proof'], 24000), {
+            'role': 'host',
+            'nonce': _clientChallenge!,
+            'certificate': certificate,
+            'group': group,
+            if (_pinnedHostContactId != null) 'from': _pinnedHostContactId,
+          })
+          .timeout(const Duration(seconds: 4));
+      if (epoch != _epoch || !identical(socket, _host)) return;
+      if (_groupId != null && _groupId != group) {
+        _end('The host session changed. Start a new chat explicitly.');
+        return;
+      }
+      final proof = await _contacts
+          .signPrivateChannel({
+            'role': 'client',
+            'to': host,
+            'nonce': nonce,
+            'certificate': certificate,
+            'group': group,
+          })
+          .timeout(const Duration(seconds: 4));
+      await _loadSelfContactId();
+      if (epoch != _epoch || !identical(socket, _host)) return;
+      _pinnedHostContactId = host;
+      _authenticatedPrivateHost = true;
+      _sendHello(socket, contactAuth: proof);
+    } catch (_) {
+      if (epoch == _epoch && identical(socket, _host)) {
+        _fail(
+          'Could not verify this private group. Verify the host by NFC and retry.',
+        );
+      }
     }
   }
 
@@ -406,6 +557,12 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
 
   void _receive(Socket socket, Map<String, dynamic> frame) {
     final type = frame['type'];
+    if (!_isHost &&
+        requireContactAuth &&
+        !_authenticatedPrivateHost &&
+        type != 'private_host') {
+      throw const FormatException('Private host is not authenticated');
+    }
     if (type == 'ping') {
       _write(socket, {'type': 'pong'});
       return;
@@ -414,7 +571,11 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     if (_isHost) {
       if (!_peers.containsKey(socket)) return;
       final identity = _peers[socket];
-      if (type == 'hello' && identity == null) {
+      if (type == 'private_open' &&
+          identity == null &&
+          requireVerifiedContact) {
+        unawaited(_openPrivateChannel(socket, frame, _epoch));
+      } else if (type == 'hello' && identity == null) {
         _hello(socket, frame);
       } else if (type == 'call' &&
           identity != null &&
@@ -459,6 +620,18 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       return;
     }
     switch (type) {
+      case 'private_host':
+        if (!requireContactAuth || !_awaitingChallenge || _welcomed) {
+          throw const FormatException('Unexpected private host proof');
+        }
+        _awaitingChallenge = false;
+        unawaited(_authenticatePrivateHost(socket, frame, _epoch));
+      case 'approval_pending':
+        if (!requireContactAuth || !_authenticatedPrivateHost || _welcomed) {
+          throw const FormatException('Unexpected approval request');
+        }
+        _waitingForApproval = true;
+        _notify();
       case 'call':
         if (supportsCalls && _welcomed && frame['to'] == selfId) {
           final from = _string(frame['from'], 64);
@@ -474,12 +647,6 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       case 'ended':
         membershipRevoked = frame['code'] == 'revoked';
         _end(_string(frame['reason'], 200));
-      case 'challenge':
-        if (_welcomed || !_awaitingChallenge) {
-          throw const FormatException('Unexpected challenge');
-        }
-        _awaitingChallenge = false;
-        unawaited(_respondToChallenge(socket, frame, _epoch));
       case 'welcome':
         if (_welcomed) throw const FormatException('Duplicate welcome');
         final group = _string(frame['groupId'], 64);
@@ -497,6 +664,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
         selfId = id;
         _groupId = group;
         _resumeToken = token;
+        _waitingForApproval = false;
         _sequence = baseline;
         if (frame['gap'] == true) {
           historyWarning =
@@ -666,6 +834,9 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     final name = _string(frame['name'], 32);
     final after = _number(frame['after']);
     final resume = frame['token'] != null || frame['groupId'] != null;
+    if (!resume && after != 0) {
+      throw const FormatException('New participant cursor');
+    }
     if (!resume &&
         hostAdmissionToken != null &&
         frame['admissionToken'] != hostAdmissionToken) {
@@ -675,12 +846,13 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       );
       return;
     }
-    if (!resume && requireVerifiedContact) {
+    if (requireVerifiedContact) {
       final challenge = _challenges.remove(socket);
       final contactAuth = frame['contactAuth'];
-      final verifier = verifyContactAuth;
-      if (challenge == null ||
-          verifier == null ||
+      final epoch = _epoch;
+      if (socket is! SecureSocket ||
+          challenge == null ||
+          !_authenticating.add(socket) ||
           contactAuth is! String ||
           contactAuth.isEmpty) {
         _rejectSession(
@@ -691,35 +863,117 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       }
       unawaited(() async {
         try {
-          final verified = await verifier(contactAuth, challenge);
-          if (!_peers.containsKey(socket)) return;
-          if (verified == null) {
-            _rejectSession(
-              socket,
-              'Only known contacts can join this private group.',
-            );
-            return;
-          }
-          _completeHello(
-            socket,
-            frame,
-            name,
-            after,
-            resume,
-            verifiedContactId: verified,
+          final verified = await _contacts
+              .verifyPrivateChannel(contactAuth, {
+                'role': 'client',
+                'nonce': challenge,
+                'certificate': _privateCertificate!,
+                'group': _groupId!,
+              })
+              .timeout(const Duration(seconds: 4));
+          final snapshot = await _contacts.load().timeout(
+            const Duration(seconds: 4),
           );
+          final contact = snapshot.contacts
+              .where(
+                (c) => c.id == verified && c.trust == ContactTrust.verified,
+              )
+              .single;
+          if (epoch != _epoch || !_peers.containsKey(socket)) return;
+          // Authentication is required on every reconnect, including token resume.
+          if (resume || _approvedContacts.contains(verified)) {
+            _completeHello(
+              socket,
+              frame,
+              contact.name,
+              after,
+              resume,
+              verifiedContactId: verified,
+            );
+          } else {
+            final pending = _PendingAdmission(
+              PrivateJoinRequest(_id(), verified, contact.name),
+              frame,
+              after,
+            );
+            _admissions[socket] = pending;
+            pending.timeout = Timer(const Duration(seconds: 60), () {
+              if (epoch == _epoch && identical(_admissions[socket], pending)) {
+                _rejectSession(
+                  socket,
+                  'The host did not approve your request. Try joining again.',
+                );
+              }
+            });
+            _write(socket, {'type': 'approval_pending'});
+            _notify();
+          }
         } catch (_) {
-          if (_peers.containsKey(socket)) {
+          if (epoch == _epoch && _peers.containsKey(socket)) {
             _rejectSession(
               socket,
               'Only known contacts can join this private group.',
             );
           }
+        } finally {
+          _authenticating.remove(socket);
         }
       }());
       return;
     }
     _completeHello(socket, frame, name, after, resume);
+  }
+
+  /// Approvals belong to this live group and this verified contact only.
+  Future<void> approveJoin(String requestId) async {
+    if (!_isHost || !requireVerifiedContact || sessionEnded) return;
+    final entry = _admissions.entries
+        .where((e) => e.value.request.id == requestId)
+        .firstOrNull;
+    if (entry == null) return;
+    final epoch = _epoch;
+    final pending = entry.value;
+    try {
+      final snapshot = await _contacts.load().timeout(
+        const Duration(seconds: 4),
+      );
+      if (epoch != _epoch || !identical(_admissions[entry.key], pending)) {
+        return;
+      }
+      final contact = snapshot.contacts
+          .where(
+            (c) =>
+                c.id == pending.request.contactId &&
+                c.trust == ContactTrust.verified,
+          )
+          .single;
+      _admissions.remove(entry.key);
+      pending.timeout?.cancel();
+      _approvedContacts.add(contact.id);
+      _completeHello(
+        entry.key,
+        pending.frame,
+        contact.name,
+        pending.after,
+        false,
+        verifiedContactId: contact.id,
+      );
+      _notify();
+    } catch (_) {
+      if (epoch == _epoch && identical(_admissions[entry.key], pending)) {
+        _rejectSession(entry.key, 'This contact is no longer verified.');
+      }
+    }
+  }
+
+  void rejectJoin(String requestId) {
+    if (!_isHost) return;
+    final entry = _admissions.entries
+        .where((e) => e.value.request.id == requestId)
+        .firstOrNull;
+    if (entry != null) {
+      _rejectSession(entry.key, 'The host declined your request to join.');
+    }
   }
 
   void _completeHello(
@@ -739,6 +993,17 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     if (resume) {
       token = _string(frame['token'], 64);
       final existing = _identities[token];
+      if (requireVerifiedContact &&
+          (existing == null ||
+              existing.participant.contactId != verifiedContactId ||
+              !_approvedContacts.contains(verifiedContactId))) {
+        _rejectSession(
+          socket,
+          'Your membership in this private group is no longer valid.',
+          code: 'revoked',
+        );
+        return;
+      }
       if (frame['groupId'] == _groupId && existing?.revoked == true) {
         _rejectSession(
           socket,
@@ -837,6 +1102,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   }
 
   void _rejectSession(Socket socket, String reason, {String? code}) {
+    _clearPendingPeer(socket);
     _write(socket, {
       'type': 'ended',
       'reason': reason,
@@ -844,13 +1110,11 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     });
     _peers.remove(socket);
     _drain(socket);
+    _notify();
   }
 
   /// Removes a member from a private group, rotating [hostAdmissionToken] if used.
-  void removePrivateMember(
-    String participantId, {
-    String? newAdmissionToken,
-  }) {
+  void removePrivateMember(String participantId, {String? newAdmissionToken}) {
     if (!canRemoveMember(participantId)) {
       throw StateError(
         'Private membership changed. Refresh the participant list.',
@@ -870,6 +1134,16 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       (i) => i.participant.id == participantId,
     );
     identity.revoked = true;
+    _approvedContacts.remove(identity.participant.contactId);
+    for (final entry in _admissions.entries.toList()) {
+      if (entry.value.request.contactId == identity.participant.contactId) {
+        _rejectSession(
+          entry.key,
+          'The host removed you from this private group.',
+          code: 'revoked',
+        );
+      }
+    }
     for (final entry in _peers.entries.toList()) {
       if (identical(entry.value, identity)) {
         _rejectSession(
@@ -885,18 +1159,19 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     _roster('${identity.participant.displayName} was removed');
   }
 
-  Map<String, Object?> _frame(ChatMessage message, {String type = 'message'}) =>
-      {
-        'type': type,
-        'id': message.id,
-        'senderId': message.senderId,
-        'name': message.senderName,
-        if (message.senderContactId != null)
-          'contactId': message.senderContactId,
-        'text': message.text,
-        'time': message.sentAt.toIso8601String(),
-        'sequence': message.sequence,
-      };
+  Map<String, Object?> _frame(
+    ChatMessage message, {
+    String type = 'message',
+  }) => {
+    'type': type,
+    'id': message.id,
+    'senderId': message.senderId,
+    'name': message.senderName,
+    if (message.senderContactId != null) 'contactId': message.senderContactId,
+    'text': message.text,
+    'time': message.sentAt.toIso8601String(),
+    'sequence': message.sequence,
+  };
 
   void _accept(
     _Identity identity,
@@ -1042,7 +1317,8 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   }
 
   void _routeCall(String from, String to, String token) {
-    if (!_allowCall(from) || !_participants.any((p) => p.id == to && p.canCall)) {
+    if (!_allowCall(from) ||
+        !_participants.any((p) => p.id == to && p.canCall)) {
       return;
     }
     if (to == selfId) {
@@ -1131,18 +1407,27 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   }
 
   void _lost(Socket socket) {
+    _clearPendingPeer(socket);
     socket.destroy();
     if (_isHost) {
       final identity = _peers.remove(socket);
       if (identity != null) {
         _participants.removeWhere((p) => p.id == identity.participant.id);
         _roster('${identity.participant.displayName} left');
+      } else {
+        _notify();
       }
     } else if (identical(socket, _host)) {
       _fail(
         'Host disconnected or stopped responding. Retry chat or rejoin the group.',
       );
     }
+  }
+
+  void _clearPendingPeer(Socket socket) {
+    _admissions.remove(socket)?.timeout?.cancel();
+    _challenges.remove(socket);
+    _authenticating.remove(socket);
   }
 
   void _fail(String message) {
@@ -1176,6 +1461,21 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     _server = null;
     _host?.destroy();
     _host = null;
+    _waitingForApproval = false;
+    _authenticatedPrivateHost = false;
+    _clientChallenge = null;
+    _privateContext = null;
+    _privateCertificate = null;
+    for (final socket in _handshaking) {
+      socket.destroy();
+    }
+    _handshaking.clear();
+    for (final pending in _admissions.values) {
+      pending.timeout?.cancel();
+    }
+    _admissions.clear();
+    _challenges.clear();
+    _authenticating.clear();
     for (final socket in _peers.keys) {
       if (graceful) {
         _drain(socket);

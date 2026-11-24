@@ -28,6 +28,12 @@ internal class ContactsBridge(private val context: Context, messenger: BinaryMes
                     check(!closed)
                     val value: Any? = when (call.method) {
                         "snapshot" -> ContactVault.open(context).snapshot()
+                        "privateChannelCertificate" -> PrivateChannelCertificate.create()
+                        "signPrivateChannel" -> ContactVault.open(context).signPrivateChannel(
+                            requireNotNull(call.argument<Map<String, Any?>>("body")))
+                        "verifyPrivateChannel" -> ContactVault.open(context).verifyPrivateChannel(
+                            requireNotNull(call.argument<String>("token")),
+                            requireNotNull(call.argument<Map<String, Any?>>("expected")))
                         "signCall" -> ContactVault.open(context).signCall(requireNotNull(call.argument<Map<String, Any?>>("body")))
                         "verifyCall" -> ContactVault.open(context).verifyCall(requireNotNull(call.argument<String>("token")))
                         "signGroupAuth" -> ContactVault.open(context).signGroupAuth(

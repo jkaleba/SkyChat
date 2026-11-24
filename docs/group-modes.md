@@ -1,5 +1,15 @@
 # Public and private groups
 
+Current private groups use NFC-verified contacts, anonymous per-group discovery,
+explicit host approval and TLS 1.3. See [private group security](private-group-security.md)
+for the current join flow, protocol and validation. Public groups retain discovery,
+QR/NFC joining and the existing public chat protocol.
+
+## Historical NFC-only private group prototype
+
+The remainder records the earlier invitation-token design. It does not describe
+current private discovery, admission or transport encryption.
+
 Choose a mode before creating a group. On phones supporting NFC sharing, Private
 is the default. Phones without NFC sharing can host public groups. Changing mode
 requires ending the current group and creating another one.

@@ -1,5 +1,12 @@
 # Chat protocol and recovery
 
+Private groups now carry these frames only inside TLS 1.3 after mutual NFC-contact
+authentication, with explicit per-group host approval before `welcome`. Resume
+always requires a fresh proof bound to the TLS certificate, group and nonce, even
+when a resume token exists. See [private group security](private-group-security.md).
+Private join/rejoin uses anonymous nearby discovery; older NFC-only private steps
+below are historical. Public group protocol v3 remains unchanged.
+
 ## Usage and hardware checks
 
 Hardware validation remains outstanding. Record phone model, Android version,

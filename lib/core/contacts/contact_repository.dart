@@ -53,6 +53,7 @@ class ContactRepository {
       // Best-effort.
     }
   }
+
   Future<ContactSnapshot> load() async {
     final raw = (await channel.invokeMapMethod<String, dynamic>('snapshot'))!;
     return ContactSnapshot(raw['identity'] as String, [
@@ -66,15 +67,27 @@ class ContactRepository {
   Future<void> block(String id) => channel.invokeMethod('block', {'id': id});
   Future<void> delete(String id) => channel.invokeMethod('delete', {'id': id});
   Future<void> reset() => channel.invokeMethod('reset');
+  Future<Map<String, dynamic>> privateChannelCertificate() async =>
+      (await channel.invokeMapMethod<String, dynamic>(
+        'privateChannelCertificate',
+      ))!;
+  Future<String> signPrivateChannel(Map<String, dynamic> body) async =>
+      (await channel.invokeMethod<String>('signPrivateChannel', {
+        'body': body,
+      }))!;
+  Future<String> verifyPrivateChannel(
+    String token,
+    Map<String, dynamic> expected,
+  ) async => (await channel.invokeMethod<String>('verifyPrivateChannel', {
+    'token': token,
+    'expected': expected,
+  }))!;
   Future<String> signCall(Map<String, dynamic> body) async =>
       (await channel.invokeMethod<String>('signCall', {'body': body}))!;
   Future<Map<String, dynamic>> verifyCall(String token) async => (await channel
       .invokeMapMethod<String, dynamic>('verifyCall', {'token': token}))!;
-  Future<String> signGroupAuth(String to, String nonce) async =>
-      (await channel.invokeMethod<String>('signGroupAuth', {
-        'to': to,
-        'nonce': nonce,
-      }))!;
+  Future<String> signGroupAuth(String to, String nonce) async => (await channel
+      .invokeMethod<String>('signGroupAuth', {'to': to, 'nonce': nonce}))!;
   Future<String> verifyGroupAuth(String token, String nonce) async =>
       (await channel.invokeMethod<String>('verifyGroupAuth', {
         'token': token,

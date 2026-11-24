@@ -75,6 +75,12 @@ Automated loopback tests do not establish physical-radio interoperability.
 
 ## 3. Authenticated encryption
 
+Private contact-authenticated TLS 1.3, anonymous group advertisements, explicit
+host approval and identity-bound resume are implemented with automated coverage.
+See [private group security](private-group-security.md). Physical Android acceptance
+remains open. Public chat and group end-to-end encryption remain separate work.
+The NFC-token milestones below describe the preceding implementation.
+
 Membership/discovery follow-up implemented (hardware verification pending): remembered private rejoin, host removal
 with resume revocation/admission rotation, and bounded service discovery recovery.
 See [private-membership.md](private-membership.md) for scope and acceptance.

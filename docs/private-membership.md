@@ -1,5 +1,15 @@
 # Private group membership and rejoining
 
+Current behavior: NFC contact verification does not grant membership. A verified
+contact requests entry and the host approves or declines that specific live group.
+Every reconnect uses TLS 1.3 and a fresh identity proof; resume tokens are bound to
+the approved contact. Removing a member revokes its token and group grant. See
+[private group security](private-group-security.md) for implementation and checks.
+
+## Historical invitation-token membership
+
+The sections below record the older NFC invitation/secret rotation implementation.
+
 This milestone keeps one current conversation in memory; it does not add durable
 storage or multiple independently saved conversations.
 

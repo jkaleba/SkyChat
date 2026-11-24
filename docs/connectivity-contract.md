@@ -1,5 +1,12 @@
 # Native connectivity contract
 
+Current private-group changes are specified in [private group security](private-group-security.md).
+`createGroup` accepts private creation without an admission token; the app uses
+verified contacts plus host approval. Private DNS-SD records use `v=4`, `mode=private`
+and a random `sid`, with no username, `cid` or credentials. Public records remain
+`v=3`. Private NFC admission-token descriptions below are retained as a historical
+bridge schema, not the current private join flow. Private chat has no plaintext fallback.
+
 Method channel: com.offlinegroupmessenger/connectivity
 Event channel: com.offlinegroupmessenger/connectivity/events
 Codec: Flutter StandardMethodCodec.
@@ -10,8 +17,8 @@ Codec: Flutter StandardMethodCodec.
 | --- | --- | --- |
 | getCapabilities | none | platform, wifiDirectSupported, implementationReady, description |
 | getState | none | Cached snapshot; also schedules a system refresh emitted as events |
-| createGroup | {privateGroup: bool, admissionToken?: string} | null when Android accepts group creation; private mode requires NFC HCE and a 64-character lowercase hex token |
-| discoverPeers | none | null when Android accepts DNS-SD discovery of public messenger groups |
+| createGroup | {privateGroup: bool, admissionToken?: string} | null when Android accepts creation; current private groups use contact authentication and host approval; optional token is the legacy NFC schema |
+| discoverPeers | none | null when Android accepts DNS-SD discovery; public v3 records and anonymous private v4 records |
 | joinGroup | {peerId: string} | null when Android accepts connection to a discovered peer |
 | disconnect | none | null after discovery/negotiation cleanup and group removal |
 | rotatePrivateAdmission | previous/next admission secrets | host-only private rotation; stops NFC sharing, rejects stale expected secret or busy/changed group |

@@ -7,7 +7,7 @@ import android.os.Handler
 import android.os.SystemClock
 import android.util.Log
 
-/** DNS-SD advertises public groups only. Never publishes network/admission credentials. */
+/** App-only DNS-SD records. Never publishes network/admission credentials. */
 internal class PublicGroupDiscovery(
     private val manager: WifiP2pManager,
     private val handler: Handler,
@@ -22,6 +22,7 @@ internal class PublicGroupDiscovery(
     private var advertisedPrivate = false
     private var advertisedContactId: String? = null
     private var advertisedHostName: String? = null
+    private var privateSessionId: String? = null
     private var advertisementRevision = 0
     private var scanRevision = 0
     private var scanning = false
@@ -34,20 +35,19 @@ internal class PublicGroupDiscovery(
         manager.setDnsSdResponseListeners(value, { _, _, _ -> }, { domain, record, device ->
             if (channel === value && scanning && PublicGroupRecord.accepts(domain, record)) {
                 val isPrivate = record["mode"] == "private"
-                val hostContactId = record["cid"]?.takeIf { it.isNotBlank() }
+                val sessionId = record["sid"]
                 val advertisedName = record["name"]?.trim()?.takeIf { it.isNotEmpty() }
                 Log.d("OfflineDiscovery", "TXT response accepted private=$isPrivate")
                 peers[device.deviceAddress] = Pair(buildMap {
                     put("id", device.deviceAddress)
                     put(
                         "name",
-                        advertisedName
+                        if (isPrivate) "Private group ${sessionId?.take(6)}" else advertisedName
                             ?: device.deviceName?.takeIf { it.isNotBlank() }
                             ?: if (isPrivate) "Private group" else "Public group"
                     )
                     put("isGroupOwner", true)
                     put("privateGroup", isPrivate)
-                    if (hostContactId != null) put("hostContactId", hostContactId)
                 }, SystemClock.elapsedRealtime())
                 publishPeers()
             }
@@ -65,6 +65,9 @@ internal class PublicGroupDiscovery(
             (!enabled || (privateGroup == advertisedPrivate && hostContactId == advertisedContactId && hostName == advertisedHostName))) {
             return
         }
+        if (enabled && privateGroup && !advertised) {
+            privateSessionId = java.util.UUID.randomUUID().toString().replace("-", "")
+        }
         advertised = enabled
         advertisedPrivate = privateGroup
         advertisedContactId = hostContactId
@@ -78,7 +81,8 @@ internal class PublicGroupDiscovery(
             PublicGroupRecord.fields(
                 privateGroup = privateGroup,
                 hostContactId = hostContactId,
-                hostName = hostName
+                hostName = hostName,
+                sessionId = privateSessionId
             ) + ("advertisement" to revision.toString())
         )
         service = info

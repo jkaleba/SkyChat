@@ -135,46 +135,46 @@ internal class PublicGroupDiscovery(
                 else WifiP2pDnsSdServiceRequest.newInstance()
             request = req
             Log.d("OfflineDiscovery", "Search cycle $cycle (${if (cycle == 1) "TXT" else "all DNS-SD"})")
-            var busyRetries = 0
-            fun configure() {
-                if (!current()) return
-                fun failed(reason: Int) {
-                    if (!current()) return
+            fun callback(done: (Int?) -> Unit) = object : WifiP2pManager.ActionListener {
+                override fun onSuccess() = done(null)
+                override fun onFailure(reason: Int) = done(reason)
+            }
+            // On-demand P2P can still be disabled while ordinary Wi-Fi is on.
+            // CLEAR_SERVICE_REQUESTS does not activate it and returns BUSY, so
+            // starting setup with cleanup can loop forever without a single scan.
+            ServiceDiscoverySetup(
+                steps = listOf(
+                    ServiceDiscoverySetup.Step("activate-p2p") { done ->
+                        manager.discoverPeers(ch, callback(done))
+                    },
+                    ServiceDiscoverySetup.Step("stop-peer-discovery") { done ->
+                        manager.stopPeerDiscovery(ch, callback(done))
+                    },
+                    ServiceDiscoverySetup.Step("clear-service-requests") { done ->
+                        manager.clearServiceRequests(ch, callback(done))
+                    },
+                    ServiceDiscoverySetup.Step("add-service-request") { done ->
+                        manager.addServiceRequest(ch, req, callback(done))
+                    },
+                    ServiceDiscoverySetup.Step("discover-services") { done ->
+                        manager.discoverServices(ch, callback(done))
+                    },
+                ),
+                isCurrent = ::current,
+                schedule = { delay, task -> handler.postDelayed({ task() }, delay) },
+                onStarted = {
+                    Log.d("OfflineDiscovery", "Discovery started")
+                    if (!started) { started = true; listener.onSuccess() }
+                },
+                onFailure = { stage, reason ->
                     lastError = reason
-                    Log.d("OfflineDiscovery", "Search operation failed: $reason")
-                    if (reason == WifiP2pManager.BUSY && busyRetries < 4) {
-                        busyRetries++
-                        handler.postDelayed({ configure() }, 400L * busyRetries)
-                    }
-                }
-                try { manager.clearServiceRequests(ch, object : WifiP2pManager.ActionListener {
-                    override fun onSuccess() {
-                        if (!current()) return
-                        try { manager.addServiceRequest(ch, req, object : WifiP2pManager.ActionListener {
-                            override fun onSuccess() {
-                                if (!current()) return
-                                try { manager.discoverServices(ch, object : WifiP2pManager.ActionListener {
-                                    override fun onSuccess() {
-                                        if (current()) {
-                                            Log.d("OfflineDiscovery", "Discovery started")
-                                            if (!started) { started = true; listener.onSuccess() }
-                                        }
-                                    }
-                                    override fun onFailure(reason: Int) = failed(reason)
-                                }) } catch (_: RuntimeException) { failed(WifiP2pManager.ERROR) }
-                            }
-                            override fun onFailure(reason: Int) = failed(reason)
-                        }) } catch (_: RuntimeException) { failed(WifiP2pManager.ERROR) }
-                    }
-                    override fun onFailure(reason: Int) = failed(reason)
-                }) } catch (_: RuntimeException) { failed(WifiP2pManager.ERROR) }
-            }
-            try { manager.stopPeerDiscovery(ch, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() = configure()
-                override fun onFailure(reason: Int) = configure()
-            }) } catch (_: RuntimeException) {
-                lastError = WifiP2pManager.ERROR
-            }
+                    Log.d("OfflineDiscovery", "Search stage=$stage failed: $reason")
+                },
+                onRetry = { stage, reason, retry ->
+                    lastError = reason
+                    Log.d("OfflineDiscovery", "Search stage=$stage failed: $reason; retry=$retry")
+                },
+            ).start()
             handler.postDelayed({ runCycle() }, 12_000)
         }
         runCycle()

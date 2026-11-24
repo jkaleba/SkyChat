@@ -542,8 +542,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final isKnownContact = !isPrivate || _verifiedContactIds.isNotEmpty;
     final allowJoin = canStart && isKnownContact;
     Future<void> join() => _run(() async {
-      _chat.beginNewSession();
-      _chat.prepareJoin();
+      _chat.prepareNearbyJoin(peer);
       await widget.connectivity.joinGroup(peer.id);
     });
     final contactName = !isPrivate && peer.hostContactId != null

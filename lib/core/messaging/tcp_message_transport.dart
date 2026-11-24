@@ -658,6 +658,9 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
           return;
         }
         final baseline = _number(frame['baseline']);
+        final lastRequest = frame['lastRequest'] == null
+            ? 0
+            : _number(frame['lastRequest']);
         if (_groupId != null && baseline < _sequence) {
           throw const FormatException('Cursor went backwards');
         }
@@ -666,6 +669,9 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
         _resumeToken = token;
         _waitingForApproval = false;
         _sequence = baseline;
+        // A fresh client can reclaim its contact identity after losing local
+        // state. Continue above the host's high-water mark, never reuse old IDs.
+        _nextRequest = max(_nextRequest, lastRequest);
         if (frame['gap'] == true) {
           historyWarning =
               'Some missed messages are no longer available from the host.';
@@ -1083,6 +1089,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       'groupId': _groupId,
       'token': token,
       'baseline': baseline,
+      'lastRequest': identity.lastRequest,
       'gap': resume && after < oldest - 1,
     });
     _roster(

@@ -86,6 +86,46 @@ void main() {
   tearDown(() => session.dispose());
 
   test(
+    'a new chat on the same network can later rejoin without clearing its draft',
+    () async {
+      const peer = NearbyPeer(id: 'host', name: 'Host', isGroupOwner: true);
+      session.prepareNearbyJoin(peer);
+      session.updateConnection(connected, displayName: 'Alice');
+      session.startNewChat();
+      session.draft = 'Draft in the new conversation';
+      await session.leave();
+      session.prepareNearbyJoin(peer);
+      expect(session.draft, 'Draft in the new conversation');
+      expect(transport.groupId, 'original');
+    },
+  );
+
+  for (final changeMode in [false, true]) {
+    test(
+      'a different nearby ${changeMode ? 'mode' : 'host'} starts a separate conversation',
+      () {
+        session.prepareNearbyJoin(
+          const NearbyPeer(id: 'first', name: 'Host', isGroupOwner: true),
+        );
+        session.updateConnection(connected, displayName: 'Alice');
+        session.draft = 'Belongs to the old group';
+        session.prepareNearbyJoin(
+          NearbyPeer(
+            id: changeMode ? 'first' : 'second',
+            name: 'Host',
+            isGroupOwner: true,
+            privateGroup: changeMode,
+          ),
+        );
+        expect(session.draft, isEmpty);
+        expect(session.hasConversation, isFalse);
+        expect(transport.groupId, isNull);
+        expect(session.isPrivateGroup, changeMode);
+      },
+    );
+  }
+
+  test(
     'duplicate native snapshots do not restart; restored network resumes once',
     () {
       session.updateConnection(connected, displayName: 'Alice');

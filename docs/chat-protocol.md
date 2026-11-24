@@ -69,9 +69,14 @@ Connection setup:
   invitation. Missing/wrong secrets receive `ended` before welcome or roster.
   A valid resume token identifies a previously admitted participant and does not
   require another admission secret. Public hosts do not require this field.
-- Host `welcome`: `selfId`, `groupId`, `token`, `baseline`, `gap`. A valid resume
+- Host `welcome`: `selfId`, `groupId`, `token`, `baseline`, `gap`, `lastRequest`. A valid resume
   preserves the participant ID and name. Unknown credentials or another session
   get `ended` with a reason; the host never falls back to a fresh identity silently.
+  `lastRequest` is the highest accepted send counter for this identity. The client
+  keeps the larger of its local counter and that value before enabling sends.
+  This also applies when a fresh client reclaims its previously approved contact
+  identity without a resume token. Old clients can ignore the added field; old
+  hosts omit it, so update both phones for recovery after losing local state.
 - Host `roster`: `participants` (`id`, `name`) and a join/rejoin/leave `notice`.
 - On resume, the host streams retained `message` frames after the baseline, then
   `synced` with `through` equal to the current host sequence. Sending is enabled
@@ -102,6 +107,24 @@ Message exchange:
   termination or rejected resumption. Unexpected abrupt loss remains retryable.
 
 ## Limits and lifecycle
+
+Nearby-list rejoining retains the current conversation when the selected peer and
+group mode match the previous join. It preserves history, drafts, pending request
+IDs and resume credentials. Selecting another peer/mode starts a separate local
+conversation. A nearby address is only a UI hint: group IDs, resume tokens and
+private contact/TLS proofs remain authoritative. A changed private host session
+ends the old conversation and requires an explicit new chat and new host approval.
+
+Regression (2026-11-23): nearby joining previously reset the guest's send counter
+to zero while contact deduplication reused the host's existing identity and send
+counter. The first new sends then collided with old message IDs and were rejected
+or mistaken for retries. Preserve the client session and return the host's send
+counter in `welcome`; never reset the host's duplicate protection. Socket tests
+cover public/private contact rejoin and expired accepted-message caches; the UI
+test covers Disconnect followed by selecting the same nearby group again.
+All 100 Flutter tests and static analysis pass after this correction. The debug
+APK is rebuilt for installation on both phones; physical rejoin acceptance remains
+to be repeated with this build.
 
 Recipient acknowledgements (`received`) and sender snapshots (`delivery`) are
 specified in [delivery-receipts.md](delivery-receipts.md). They are independent of

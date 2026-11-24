@@ -45,6 +45,7 @@ class ChatSessionController extends ChangeNotifier {
   GroupInvitation? _rememberedPrivateGroup;
   bool _removingMember = false;
   bool _isPrivateGroup = false;
+  String? _nearbyPeerId;
 
   ChatStatus get status => transport.status;
   String? get selfId => transport.selfId;
@@ -198,6 +199,7 @@ class ChatSessionController extends ChangeNotifier {
     _connectionKey = null;
     _sessionRole = null;
     _isPrivateGroup = false;
+    _nearbyPeerId = null;
     transport.resetSession();
     _changed();
   }
@@ -219,12 +221,26 @@ class ChatSessionController extends ChangeNotifier {
       resumeJoining();
     }
     if (invitation != null) {
+      _nearbyPeerId = null;
       _isPrivateGroup = invitation.privateGroup;
     }
     transport.invitationToken = invitation?.admissionToken;
     _joinCandidate = invitation;
     transport.hostAdmissionToken = null;
     transport.requireVerifiedContact = false;
+  }
+
+  /// Nearby addresses are only a UI hint. The host still verifies the group,
+  /// resume token and (for private groups) the pinned contact on every reconnect.
+  void prepareNearbyJoin(NearbyPeer peer) {
+    if (_nearbyPeerId != peer.id ||
+        _isPrivateGroup != peer.privateGroup ||
+        sessionEnded) {
+      beginNewSession();
+    }
+    prepareJoin();
+    _nearbyPeerId = peer.id;
+    _isPrivateGroup = peer.privateGroup;
   }
 
   static String _newAdmissionToken() {
@@ -271,7 +287,11 @@ class ChatSessionController extends ChangeNotifier {
   }
 
   void startNewChat() {
+    final nearbyPeerId = _nearbyPeerId;
     beginNewSession();
+    // Starting a new chat changes the conversation, not the selected Wi-Fi peer.
+    _nearbyPeerId = nearbyPeerId;
+    _isPrivateGroup = _connection.privateGroup;
     _sessionRole = _connection.isHost;
     _connectionKey = networkConnected
         ? '${_connection.isHost}:${_connection.hostAddress}'

@@ -171,6 +171,53 @@ void main() {
     },
   );
 
+  for (final expireAcceptedMessages in [false, true]) {
+    test(
+      'fresh contact session sends immediately after rejoin (expired=$expireAcceptedMessages)',
+      () async {
+        await connect();
+        await approve();
+        await alice.sendText('Before leaving one');
+        await alice.sendText('Before leaving two');
+        final identity = alice.selfId;
+        await alice.close();
+        await until(() => host.participants.length == 1);
+        if (expireAcceptedMessages) {
+          for (var i = 0; i < TcpMessageTransport.acceptanceLimit; i++) {
+            await host.sendText('Host message $i');
+          }
+        }
+        // A fresh client/process retains the NFC identity but has no request counter.
+        alice.resetSession();
+        await connect();
+        await until(() => alice.status == ChatStatus.ready);
+        expect(alice.selfId, identity);
+        expect(host.joinRequests, isEmpty);
+        await alice.sendText('First new message');
+        await alice.sendText('Second new message');
+        expect(
+          texts(host).where((m) => m.senderId == identity).map((m) => m.text),
+          expireAcceptedMessages
+              ? ['First new message', 'Second new message']
+              : [
+                  'Before leaving one',
+                  'Before leaving two',
+                  'First new message',
+                  'Second new message',
+                ],
+        );
+        expect(
+          texts(host)
+              .where((m) => m.senderId == identity)
+              .map((m) => m.id)
+              .toSet()
+              .length,
+          expireAcceptedMessages ? 2 : 4,
+        );
+      },
+    );
+  }
+
   test(
     'a new host group requires an explicit new conversation and approval',
     () async {

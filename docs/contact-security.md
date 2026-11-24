@@ -4,6 +4,10 @@ Implementation baseline, 2026-11-08. This is an application protocol using stand
 cryptographic formats, not an independently audited security claim. C2 adds trusted
 contacts; it does not encrypt existing chat or grant group membership.
 
+The C2 milestone below is historical. The later [private group channel](private-group-security.md)
+uses these NFC-pinned identities to authenticate TLS 1.3 and requires host approval
+for each live group. Contact pairing alone still grants no membership.
+
 ## Cryptography and identity
 
 Use Android Keystore P-256 signing keys, generated once per installation and never

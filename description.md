@@ -1,5 +1,10 @@
 # Offline Group Messenger
 
+Current private-group behavior is specified in [private group security](docs/private-group-security.md):
+anonymous discovery, NFC-verified contacts, host approval and contact-authenticated
+TLS 1.3. Earlier NFC-only admission and plaintext-private-chat descriptions below
+record the preceding prototype. Public group behavior is unchanged.
+
 Flutter GUI shared between Android and iPhone, with **Kotlin for Android
 connectivity** and a **Swift stub for future iOS connectivity**.
 

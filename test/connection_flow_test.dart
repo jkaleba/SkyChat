@@ -7,6 +7,7 @@ import 'package:offline_group_messenger/app/app.dart';
 import 'package:offline_group_messenger/core/messaging/chat_session_controller.dart';
 import 'package:offline_group_messenger/core/messaging/tcp_message_transport.dart';
 import 'package:offline_group_messenger/features/home/home_screen.dart';
+import 'chat_session_controller_test.dart' show ControlledTransport, connected;
 
 class FakeConnection extends OfflineConnectivity {
   final updates = StreamController<GroupConnectionState>.broadcast();
@@ -64,6 +65,65 @@ class FakeConnection extends OfflineConnectivity {
 
 void main() {
   testWidgets(
+    'joining the same nearby group after leaving preserves the conversation',
+    (tester) async {
+      final connection = FakeConnection();
+      final transport = ControlledTransport();
+      final chat = ChatSessionController(transport: transport);
+      addTearDown(() {
+        chat.dispose();
+        connection.updates.close();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: HomeScreen(connectivity: connection, chat: chat),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Future<void> chooseHost() async {
+        connection.updates.add(
+          const GroupConnectionState(
+            status: GroupStatus.discovering,
+            wifiEnabled: true,
+            permissionGranted: true,
+            peers: [
+              NearbyPeer(id: 'same-host', name: 'Host', isGroupOwner: true),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.text('Join'),
+          150,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.ensureVisible(find.text('Join'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Join'));
+        await tester.pumpAndSettle();
+      }
+
+      await chooseHost();
+      connection.updates.add(connected);
+      await tester.pumpAndSettle();
+      chat.draft = 'Keep this draft after rejoining';
+      await tester.scrollUntilVisible(
+        find.text('Disconnect'),
+        -150,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Disconnect'));
+      await tester.pumpAndSettle();
+      await chooseHost();
+      expect(chat.draft, 'Keep this draft after rejoining');
+      expect(transport.groupId, 'original');
+      connection.updates.add(connected);
+      await tester.pumpAndSettle();
+      expect(transport.connects, 2);
+    },
+  );
+
+  testWidgets(
     'accepted creation waits for connection info and shows actual IP',
     (tester) async {
       final connection = FakeConnection();
@@ -77,7 +137,9 @@ void main() {
         150,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create a group'));
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, 'Create a group'),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Create a group'));
       await tester.pumpAndSettle();
@@ -157,7 +219,9 @@ void main() {
       150,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create a group'));
+    await tester.ensureVisible(
+      find.widgetWithText(FilledButton, 'Create a group'),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Create a group'));
     await tester.pumpAndSettle();
@@ -189,7 +253,9 @@ void main() {
         connection.updates.close();
       });
       await tester.pumpWidget(
-        MaterialApp(home: HomeScreen(connectivity: connection, chat: chat)),
+        MaterialApp(
+          home: HomeScreen(connectivity: connection, chat: chat),
+        ),
       );
       await tester.pumpAndSettle();
 

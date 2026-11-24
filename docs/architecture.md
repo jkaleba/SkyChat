@@ -58,15 +58,13 @@ https://docs.flutter.dev/platform-integration/platform-channels
   timeouts and cancellation. InvitationApdu is a pure Kotlin protocol with JVM
   tests. Both QR and NFC return the same validated GroupInvitation and require
   the same confirmation before joinInvitation. No NFC chat transport is added.
-- Private creation generates a 256-bit admission secret in Dart and passes it to
-  native group creation for NFC sharing. Private invitation schema v2 carries it;
-  public invitations retain schema v1. The native QR method and Dart scanner both
-  reject private invitations. The TCP host checks admission before sending any
-  welcome/roster/history to a first-time participant. Resume tokens still work.
-- PublicGroupDiscovery registers a DNS-SD service for public hosts only and filters
-  discovery responses to this app's public service records. Generic Wi-Fi devices
-  are excluded. Advertisement callbacks and scans have generation/lifecycle checks;
-  service records contain no credentials. Nearby entries expire after 60 seconds.
+- Private groups require NFC-verified contacts, TLS 1.3 and explicit host approval
+  for each live chat. Resume requires a fresh contact proof and a matching member
+  token; removal revokes both membership and the token. See private-group-security.md.
+- PublicGroupDiscovery registers app-specific DNS-SD records. Public records may
+  name the host; private version-4 records carry only a random per-group label,
+  with no name, contact fingerprint or credentials. Nearby entries expire after
+  60 seconds. Advertisements are untrusted hints, not authenticated identities.
 
 ## Next implementation steps
 
@@ -75,7 +73,8 @@ C2 adds durable contacts and a separate mutual NFC verification flow. C3 uses
 `CallController` and signed directed signaling on the existing chat connection,
 with P2P-only WebRTC media outside the TCP chat queue. Contact signing keys and
 the AES-GCM store key stay in Android Keystore; only public contact data reaches
-Dart. Chat remains plaintext and its history remains in memory. The audio plugin
+Dart. Private chat uses authenticated TLS to the host; public chat remains plaintext.
+The host forwards and can read group text. History remains in memory. The audio plugin
 observes the existing group and never removes it. C3 is foreground host/client
 calling; integrated hardware acceptance remains pending.
 BLE invitations and accepted-call temporary Wi-Fi Direct setup are future C4 work.

@@ -263,10 +263,13 @@ void main() {
         port: customHost.listeningPort!,
       );
       await until(() => customHost.participants.length == 2);
-      expect(
-        customHost.participants.map((p) => p.displayName).toList(),
-        ['Host', 'SM-A217F'],
-      );
+      expect(customHost.participants.map((p) => p.displayName).toList(), [
+        'Host',
+        'SM-A217F',
+      ]);
+      await until(() => firstAlice.status == ChatStatus.ready);
+      await firstAlice.sendText('Before leaving one');
+      await firstAlice.sendText('Before leaving two');
 
       await secondAlice.connect(
         host: '127.0.0.1',
@@ -279,13 +282,26 @@ void main() {
 
       expect(customHost.participants.length, 2);
       expect(customHost.members.length, 2);
+      expect(customHost.participants.map((p) => p.displayName).toList(), [
+        'Host',
+        'Alice',
+      ]);
+      expect(secondAlice.participants.map((p) => p.displayName).toList(), [
+        'Host',
+        'Alice',
+      ]);
+      await secondAlice.sendText('First message after rejoining');
+      await secondAlice.sendText('Second message after rejoining');
       expect(
-        customHost.participants.map((p) => p.displayName).toList(),
-        ['Host', 'Alice'],
-      );
-      expect(
-        secondAlice.participants.map((p) => p.displayName).toList(),
-        ['Host', 'Alice'],
+        customHost.messages
+            .where((message) => message.sequence > 0)
+            .map((message) => message.text),
+        [
+          'Before leaving one',
+          'Before leaving two',
+          'First message after rejoining',
+          'Second message after rejoining',
+        ],
       );
     },
   );

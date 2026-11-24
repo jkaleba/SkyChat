@@ -8,6 +8,7 @@ import '../../core/messaging/tcp_message_transport.dart';
 import '../../core/messaging/chat_session_controller.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/participant.dart';
+import 'private_membership_panel.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -334,6 +335,7 @@ class _ChatScreenState extends State<ChatScreen> {
         body: SafeArea(
           child: Column(
             children: [
+              PrivateMembershipPanel(transport: chat.transport),
               ListTile(
                 dense: true,
                 title: Text(
@@ -347,7 +349,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 subtitle: Text(
                   chat.error ??
-                      'Prototype: no end-to-end encryption. History is kept in memory only.',
+                      (chat.transport.privateChannelAuthenticated
+                          ? 'Private connection encrypted. The host forwards messages. History is kept in memory.'
+                          : 'Prototype: no end-to-end encryption. History is kept in memory only.'),
                 ),
                 trailing: chat.sessionEnded && chat.networkConnected
                     ? TextButton(

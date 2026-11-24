@@ -118,7 +118,9 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
             onPeers = { values -> peers = values; if (attached) sink?.success(snapshot()) },
             onAdvertiseError = {
                 errorCode = "discovery_unavailable"
-                errorMessage = "Public discovery is unavailable. Recreate the group or share its QR/NFC invitation."
+                errorMessage = if (privateGroup)
+                    "Android could not advertise this private group. End the group and create it again."
+                else "Public discovery is unavailable. Recreate the group or share its QR/NFC invitation."
                 if (attached) sink?.success(snapshot())
             },
             onSearchFinished = {
@@ -162,17 +164,13 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
     private fun emit() {
         if (status != "connected" || !isHost || privateGroup) nfc.stopSharing()
         val shouldAdvertise = status == "connected" && isHost && wifiEnabled && permitted()
-        val hostContactId = if (shouldAdvertise && privateGroup) {
-            try { ContactVault.open(context).crypto.id } catch (_: Exception) { null }
-        } else null
-        val hostName = if (shouldAdvertise) {
+        val hostName = if (shouldAdvertise && !privateGroup) {
             context.getSharedPreferences("skychat_prefs", Context.MODE_PRIVATE)
                 .getString("username", null)?.trim()?.takeIf { it.isNotEmpty() }
         } else null
         discovery?.advertise(
             shouldAdvertise,
             privateGroup = privateGroup,
-            hostContactId = hostContactId,
             hostName = hostName
         )
         if (attached) sink?.success(snapshot())

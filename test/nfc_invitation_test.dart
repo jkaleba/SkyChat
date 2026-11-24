@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offline_connectivity/offline_connectivity.dart';
-import 'package:offline_group_messenger/app/app.dart';
 import 'package:offline_group_messenger/features/invitations/nfc_invitation_screen.dart';
 import 'qr_invitation_test.dart' show QrConnection, invitation;
 

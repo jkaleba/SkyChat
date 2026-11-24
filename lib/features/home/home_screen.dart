@@ -4,10 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:offline_connectivity/offline_connectivity.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../invitations/scan_invitation_screen.dart';
-import '../invitations/nfc_invitation_screen.dart';
 import '../../core/messaging/tcp_message_transport.dart';
 import '../../core/messaging/chat_session_controller.dart';
 import '../chat/chat_screen.dart';
+import '../chat/private_membership_panel.dart';
 import '../contacts/contacts_screen.dart';
 import '../calling/call_screen.dart';
 import '../../core/background/background_service.dart';
@@ -47,7 +47,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _groupEpoch = 0;
   bool _privateMode = false;
   bool _modeSelected = false;
-  bool _showNearby = false;
   bool _disconnectingRevoked = false;
   bool _inForeground = true;
   bool _chatScreenOpen = false;
@@ -76,10 +75,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ChatSessionController(
           transport: TcpMessageTransport(contacts: widget.contacts),
         );
-    _chat.transport.signContactAuth ??= (hostContactId, nonce) =>
-        widget.contacts.signGroupAuth(hostContactId, nonce);
-    _chat.transport.verifyContactAuth ??= (token, nonce) =>
-        widget.contacts.verifyGroupAuth(token, nonce);
     _calls = CallController(_chat.transport)..addListener(_callChanged);
     WidgetsBinding.instance.addObserver(this);
     _chat.addListener(_membershipChanged);
@@ -311,7 +306,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _findNearby() async {
-    setState(() => _showNearby = true);
     await _run(widget.connectivity.discoverPeers);
   }
 
@@ -477,19 +471,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _confirmInvitation(invitation);
   }
 
-  Future<void> _nfcInvitation({required bool sharing}) async {
-    final invitation = await Navigator.of(context).push<GroupInvitation>(
-      MaterialPageRoute(
-        builder: (_) => NfcInvitationScreen(
-          connectivity: widget.connectivity,
-          sharing: sharing,
-          privateGroup: sharing && _connection.privateGroup,
-        ),
-      ),
-    );
-    if (!sharing) await _confirmInvitation(invitation);
-  }
-
   Future<void> _confirmInvitation(GroupInvitation? invitation) async {
     if (invitation == null || !mounted) return;
     final confirm = await showDialog<bool>(
@@ -556,17 +537,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _buildPeerCard(NearbyPeer peer, bool canStart) {
     final isPrivate = peer.privateGroup;
-    final isKnownContact =
-        !isPrivate ||
-        (peer.hostContactId != null &&
-            _verifiedContactIds.contains(peer.hostContactId));
+    // Private advertisements carry only an ephemeral group label. The actual
+    // host is checked against NFC contacts inside the authenticated TLS channel.
+    final isKnownContact = !isPrivate || _verifiedContactIds.isNotEmpty;
     final allowJoin = canStart && isKnownContact;
     Future<void> join() => _run(() async {
-      _chat.beginNewSession();
-      _chat.prepareJoin();
+      _chat.prepareNearbyJoin(peer);
       await widget.connectivity.joinGroup(peer.id);
     });
-    final contactName = peer.hostContactId != null
+    final contactName = !isPrivate && peer.hostContactId != null
         ? _contactNames[peer.hostContactId!]
         : null;
     final peerTitle = (contactName != null && contactName.isNotEmpty)
@@ -582,8 +561,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         subtitle: Text(
           isPrivate
               ? (isKnownContact
-                    ? 'Private group (known contact)'
-                    : 'Private group (unknown host — add as contact to join)')
+                    ? 'Private group · Host approval required'
+                    : 'Verify a contact by NFC before joining')
               : (peer.isGroupOwner ? 'Public group host' : 'Public group'),
         ),
         trailing: TextButton(
@@ -1043,7 +1022,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 8),
           Text(
             _privateMode
-                ? 'Listed for nearby app users. Only known contacts can join; chat is not yet encrypted.'
+                ? 'Nearby users see an anonymous group label. Verified contacts need your approval to join.'
                 : 'Listed for nearby app users. Join through discovery, QR or NFC. Chat is not yet encrypted.',
           ),
           const SizedBox(height: 12),
@@ -1095,67 +1074,74 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       },
       child: Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.asset(
-                'assets/images/logo.png',
-                width: 28,
-                height: 28,
-                fit: BoxFit.cover,
+        appBar: AppBar(
+          title: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  width: 28,
+                  height: 28,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Flexible(
+                child: Text('SkyChat', overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
+        ),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: Column(
+                children: [
+                  PrivateMembershipPanel(transport: _chat.transport),
+                  Expanded(
+                    child: switch (_selectedIndex) {
+                      0 => _buildGroupsTab(context),
+                      1 => ContactsScreen(
+                        repository: widget.contacts,
+                        calls: _calls,
+                        embedded: true,
+                        onUsernameChanged: _applyUsername,
+                      ),
+                      _ => CallScreen(calls: _calls, embedded: true),
+                    },
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 10),
-            const Flexible(
-              child: Text('SkyChat', overflow: TextOverflow.ellipsis),
+          ),
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: (index) {
+            setState(() => _selectedIndex = index);
+            if (index == 0) unawaited(_loadVerifiedContacts());
+            if (index == 1) unawaited(_calls.refreshContacts());
+          },
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.groups_outlined),
+              selectedIcon: Icon(Icons.groups),
+              label: 'Groups',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.contacts_outlined),
+              selectedIcon: Icon(Icons.contacts),
+              label: 'Contacts',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.call_outlined),
+              selectedIcon: Icon(Icons.call),
+              label: 'Calls',
             ),
           ],
         ),
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: switch (_selectedIndex) {
-              0 => _buildGroupsTab(context),
-              1 => ContactsScreen(
-                repository: widget.contacts,
-                calls: _calls,
-                embedded: true,
-                onUsernameChanged: _applyUsername,
-              ),
-              _ => CallScreen(calls: _calls, embedded: true),
-            },
-          ),
-        ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          setState(() => _selectedIndex = index);
-          if (index == 0) unawaited(_loadVerifiedContacts());
-          if (index == 1) unawaited(_calls.refreshContacts());
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.groups_outlined),
-            selectedIcon: Icon(Icons.groups),
-            label: 'Groups',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.contacts_outlined),
-            selectedIcon: Icon(Icons.contacts),
-            label: 'Contacts',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.call_outlined),
-            selectedIcon: Icon(Icons.call),
-            label: 'Calls',
-          ),
-        ],
-      ),
       ),
     );
   }

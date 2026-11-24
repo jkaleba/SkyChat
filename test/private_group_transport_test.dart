@@ -1,14 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:offline_group_messenger/core/contacts/contact_repository.dart';
 import 'package:offline_group_messenger/core/messaging/tcp_message_transport.dart';
 import 'package:offline_group_messenger/core/messaging/chat_session_controller.dart';
 import 'session_recovery_test.dart' show until, texts;
-
-class _FakeContacts extends ContactRepository {
-  @override
-  Future<ContactSnapshot> load() async =>
-      const ContactSnapshot('host-contact-id', []);
-}
+import 'support/private_contacts.dart';
 
 void main() {
   test(
@@ -97,24 +91,24 @@ void main() {
   test(
     'contact-verified private group admits known contacts and rejects unknown peers',
     () async {
-      final host = TcpMessageTransport(contacts: _FakeContacts())
-        ..displayName = 'Host'
-        ..requireVerifiedContact = true
-        ..verifyContactAuth = (token, nonce) async {
-          if (token != 'valid:$nonce') throw StateError('Unknown contact');
-          return 'alice-contact-id';
-        };
-      final knownClient = TcpMessageTransport()
-        ..displayName = 'Alice'
-        ..requireContactAuth = true
-        ..signContactAuth = (hostId, nonce) async {
-          expect(hostId, 'host-contact-id');
-          return 'valid:$nonce';
-        };
-      final unknownClient = TcpMessageTransport()
-        ..displayName = 'Mallory'
-        ..requireContactAuth = true
-        ..signContactAuth = (hostId, nonce) async => 'invalid:$nonce';
+      final host =
+          TcpMessageTransport(
+              contacts: PrivateContacts('host', {'alice': 'Alice'}),
+            )
+            ..displayName = 'Host'
+            ..requireVerifiedContact = true;
+      final knownClient =
+          TcpMessageTransport(
+              contacts: PrivateContacts('alice', {'host': 'Host'}),
+            )
+            ..displayName = 'Alice'
+            ..requireContactAuth = true;
+      final unknownClient =
+          TcpMessageTransport(
+              contacts: PrivateContacts('mallory', {'host': 'Host'}),
+            )
+            ..displayName = 'Mallory'
+            ..requireContactAuth = true;
       addTearDown(() {
         knownClient.dispose();
         unknownClient.dispose();
@@ -124,6 +118,8 @@ void main() {
       await host.startHost(port: 0, address: '127.0.0.1');
 
       await knownClient.connect(host: '127.0.0.1', port: host.listeningPort!);
+      await until(() => host.joinRequests.isNotEmpty);
+      await host.approveJoin(host.joinRequests.single.id);
       await until(() => knownClient.status == ChatStatus.ready);
       await knownClient.sendText('Hello from contact');
       await until(

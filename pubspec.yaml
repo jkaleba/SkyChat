@@ -16,6 +16,7 @@ dependencies:
     path: packages/offline_audio
   qr_flutter: ^4.1.0
   mobile_scanner: 7.1.4
+  crypto: ^3.0.6
 
 dev_dependencies:
   flutter_test:

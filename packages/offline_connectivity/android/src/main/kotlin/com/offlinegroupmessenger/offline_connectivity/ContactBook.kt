@@ -98,6 +98,41 @@ internal class ContactBook(
             payload["nonce"] == expectedNonce)
         return from
     }
+    /** Bind both NFC identities to this TLS certificate, group, role and fresh challenge. */
+    @Synchronized fun signPrivateChannel(body: Map<String, Any?>): String {
+        val role = body["role"] as String
+        val to = body["to"] as String
+        require(role in setOf("host", "client"))
+        require((body["nonce"] as String).matches(Regex("[a-f0-9]{64}")))
+        require((body["certificate"] as String).matches(Regex("[a-f0-9]{64}")))
+        require((body["group"] as String).matches(Regex("[a-f0-9]{32}")))
+        if (role == "client") require(records[to]?.get("state") == "verified")
+        else require(to.isEmpty())
+        return crypto.sign(mapOf(
+            "scope" to "ogm-private-channel-v1", "from" to crypto.id, "to" to to,
+            "role" to role, "nonce" to body["nonce"], "certificate" to body["certificate"], "group" to body["group"]
+        ))
+    }
+    @Synchronized fun verifyPrivateChannel(token: String, expected: Map<String, Any?>): String {
+        require(token.length <= 24000)
+        val untrusted = JSONObjectUtils.parse(com.nimbusds.jose.JWSObject.parse(token).payload.toString())
+        val from = untrusted["from"] as String
+        val contact = requireNotNull(records[from])
+        require(contact["state"] == "verified")
+        val payload = ContactCrypto.verify(token, contact["key"] as String)
+        val role = expected["role"] as String
+        require(role in setOf("host", "client"))
+        require(payload.keys == setOf("scope", "from", "to", "role", "nonce", "certificate", "group"))
+        require(payload["scope"] == "ogm-private-channel-v1" && payload["from"] == from)
+        for (field in listOf("role", "nonce", "certificate", "group")) require(payload[field] == expected[field])
+        if (role == "client") require(payload["to"] == crypto.id)
+        else {
+            require(payload["to"] == "")
+            val pinned = expected["from"] as? String
+            if (pinned != null) require(from == pinned)
+        }
+        return from
+    }
     companion object {
         fun name(value: String): String = value.trim().also {
             require(it.length in 1..32 && it.none { c -> c.code < 32 || c.code == 127 })

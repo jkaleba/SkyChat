@@ -1,5 +1,37 @@
 # Discovery-to-connection handoff
 
+## On-demand P2P discovery startup (2026-11-23)
+
+The OPPO Android 13 report showed repeated `Search operation failed: 2`. ADB
+confirmed ordinary Wi-Fi enabled, Nearby devices permission granted, and
+`curState=P2pDisabledState`. The service history showed this app repeatedly sending
+`STOP_DISCOVERY` and `CLEAR_SERVICE_REQUESTS` in that disabled state, without ever
+reaching an operation that activates the P2P interface. The Xiaomi Android 11 host
+already had `GroupCreatedState`.
+
+Android's on-demand P2P service can keep the interface inactive until an operation
+requiring active P2P arrives. Cleanup and state queries do not activate it;
+`CLEAR_SERVICE_REQUESTS` can therefore return BUSY indefinitely. See
+[AOSP WifiP2pServiceImpl](https://android.googlesource.com/platform/packages/modules/Wifi/+/refs/heads/master/service/java/com/android/server/wifi/p2p/WifiP2pServiceImpl.java),
+`needsActiveP2p` and `P2pDisabledState`.
+
+Discovery now starts with `discoverPeers` to activate P2P, stops that bootstrap
+scan, waits briefly for the driver, clears/adds the DNS-SD request, and starts
+service discovery. `ServiceDiscoverySetup` retries the failing stage with bounded
+backoff instead of clearing/recreating service requests on every BUSY response.
+Each setup has a 10-second callback deadline within its 12-second search cycle.
+Logs identify the exact failed stage. Existing TXT-to-all-DNS-SD fallback and
+per-cycle/search generation checks remain. Generic bootstrap peers are never
+added to the UI; only validated public/private app service records are displayed.
+Selected-host joining still avoids STOP_DISCOVERY to preserve Android's peer table.
+
+Regression tests cover inactive-interface startup order, transient/persistent BUSY,
+retrying only the failed stage, permanent errors, missing/late callbacks,
+cancellation, duplicate callbacks and the driver settling delay. All 43 Android
+connectivity tests pass, including seven new discovery-setup regressions, and the
+debug APK builds. Device acceptance of this correction remains pending installation
+of the updated native APK; hot reload does not update Kotlin code.
+
 ## Evidence
 
 After the offline setup update, both guests reported Android error 0 when joining

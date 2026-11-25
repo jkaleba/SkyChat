@@ -194,7 +194,7 @@ class _FirstRunGateState extends State<FirstRunGate> {
                     icon: Icons.group_add_outlined,
                     title: 'Create or join a group',
                     text:
-                        'Create a group on one phone, then join from the other. Public groups support nearby search, QR and NFC. Private groups use verified NFC contacts and host approval.',
+                        'Create a group on one phone, then join from the other. Public groups support nearby search, QR and NFC. Private groups automatically verify NFC contacts before admitting them.',
                   ),
                   const _WelcomeFact(
                     icon: Icons.tune,

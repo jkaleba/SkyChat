@@ -620,7 +620,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         subtitle: Text(
           isPrivate
               ? (isKnownContact
-                    ? 'Private group · Host approval required'
+                    ? 'Private group · Verified contacts only'
                     : 'Verify a contact by NFC before joining')
               : (peer.isGroupOwner ? 'Public group host' : 'Public group'),
         ),
@@ -783,7 +783,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onTap: _canStart ? () => _nfcInvitation(sharing: false) : null,
           ),
         const Text(
-          'Private groups require a contact verified by NFC and host approval. You can add contacts in the Contacts tab.',
+          'Private groups require a contact verified by NFC. You can add contacts in the Contacts tab.',
         ),
         const SizedBox(height: 16),
         Text(
@@ -1216,7 +1216,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 8),
           Text(
             _privateMode
-                ? 'Nearby users see an anonymous group label. Verified contacts need your approval to join.'
+                ? 'Nearby users see an anonymous group label. Verified contacts join automatically after connecting.'
                 : 'Listed for nearby app users. Join through discovery, QR or NFC. Chat is not yet encrypted.',
           ),
           const SizedBox(height: 8),

@@ -118,8 +118,6 @@ void main() {
       await host.startHost(port: 0, address: '127.0.0.1');
 
       await knownClient.connect(host: '127.0.0.1', port: host.listeningPort!);
-      await until(() => host.joinRequests.isNotEmpty);
-      await host.approveJoin(host.joinRequests.single.id);
       await until(() => knownClient.status == ChatStatus.ready);
       await knownClient.sendText('Hello from contact');
       await until(

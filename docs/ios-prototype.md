@@ -74,7 +74,7 @@ Keychain items can survive app removal.
    or fall back to internet/mobile data to discover a host.
 6. The shared private TLS handshake verifies the host's NFC-pinned identity,
    certificate-bound challenge, group ID and then the client's proof. Android's
-   host must choose **Approve join** before messages, roster, or history arrive.
+   host automatically admits a verified contact before messages, roster, or history arrive.
 7. Send text both ways and check receipts. Network association alone is not chat
    admission. A public group may also be invited, retaining its existing public
    plaintext chat semantics.
@@ -83,7 +83,7 @@ The new `startIosNfcSharing` action is separate from Android's existing NFC and
 QR invitation methods. It adds the real GO `hostAddress`; private invitations use
 version 3 with no admission token. Wi-Fi credentials do not grant private group
 membership. Android's existing discovery, creation, joining, contact proof,
-TLS and host approval paths remain in place. Version 3 is an iPhone prototype
+TLS and contact-verification paths remain in place. Version 3 is an iPhone prototype
 invitation, not a replacement for Android's existing version 1/2 invitation flow.
 
 ## Physical acceptance still required
@@ -96,10 +96,10 @@ invitation, not a replacement for Android's existing version 1/2 invitation flow
 - Test whether each Android group owner accepts iPhone as a legacy Wi-Fi client.
   This is the main hardware gate: source code cannot guarantee OEM behavior.
 - Disable mobile data and disconnect any router. Verify NFC invitation, iOS Wi-Fi
-  association, host approval, text both ways and receipts without internet.
+  association, automatic verified-contact admission, text both ways and receipts without internet.
 - Deny Local Network/Wi-Fi permission, cancel joining, disconnect during joining,
   end the host group, and move out of range. No false chat-ready state is allowed.
-- Decline admission; block/delete a contact; remove an offline member; retry after
+- Reject an unknown contact; block/delete a contact; remove an offline member; retry after
   creating a new group. Capture traffic to verify private frames stay encrypted.
 - Background/lock iPhone and return. `joinOnce` may drop its Wi-Fi association;
   rejoin explicitly by NFC as needed. No always-on offline receiving is promised.

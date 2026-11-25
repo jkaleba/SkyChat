@@ -1,7 +1,7 @@
 # Chat protocol and recovery
 
 Private groups now carry these frames only inside TLS 1.3 after mutual NFC-contact
-authentication, with explicit per-group host approval before `welcome`. Resume
+authentication, with automatic verified-contact admission before `welcome`. Resume
 always requires a fresh proof bound to the TLS certificate, group and nonce, even
 when a resume token exists. See [private group security](private-group-security.md).
 Private join/rejoin uses anonymous nearby discovery; older NFC-only private steps
@@ -114,7 +114,7 @@ group mode match the previous join. It preserves history, drafts, pending reques
 IDs and resume credentials. Selecting another peer/mode starts a separate local
 conversation. A nearby address is only a UI hint: group IDs, resume tokens and
 private contact/TLS proofs remain authoritative. A changed private host session
-ends the old conversation and requires an explicit new chat and new host approval.
+ends the old conversation and requires an explicit new chat before automatic verified-contact admission.
 
 Regression (2026-11-23): nearby joining previously reset the guest's send counter
 to zero while contact deduplication reused the host's existing identity and send

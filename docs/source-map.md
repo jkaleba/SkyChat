@@ -62,7 +62,7 @@ branded SkyChat.
 | Change public QR invitations | [HomeScreen](../lib/features/home/home_screen.dart), [ScanInvitationScreen](../lib/features/invitations/scan_invitation_screen.dart) | [GroupInvitation](../packages/offline_connectivity/lib/src/group_invitation.dart), native `getInvitation` and `joinInvitation`. |
 | Find nearby app group discovery | [HomeScreen](../lib/features/home/home_screen.dart) | `PublicGroupDiscovery`, `PublicGroupRecord`, `ServiceDiscoverySetup`; both group modes use these classes. |
 | Find private group authentication | [private_channel.dart](../lib/core/messaging/private_channel.dart), [tcp_message_transport.dart](../lib/core/messaging/tcp_message_transport.dart) | `PrivateChannelCertificate`, `ContactsBridge`, `ContactBook.signPrivateChannel` and `verifyPrivateChannel`. |
-| Change host approval or removal UI | [private_membership_panel.dart](../lib/features/chat/private_membership_panel.dart), [chat_screen.dart](../lib/features/chat/chat_screen.dart) | Transport `approveJoin`, `rejectJoin`, `removePrivateMember`; controller `removePrivateMember`. |
+| Change legacy-host notices or removal UI | [private_membership_panel.dart](../lib/features/chat/private_membership_panel.dart), [chat_screen.dart](../lib/features/chat/chat_screen.dart) | Transport `waitingForApproval`, `removePrivateMember`; controller `removePrivateMember`. |
 | Find message sending and recovery | [ChatSessionController](../lib/core/messaging/chat_session_controller.dart) | [TcpMessageTransport](../lib/core/messaging/tcp_message_transport.dart). |
 | Find delivery checkmarks | [chat_screen.dart](../lib/features/chat/chat_screen.dart), [message_delivery.dart](../lib/core/models/message_delivery.dart) | Transport `_accept`, `_publishDelivery` and `received` handling in `_receive`. |
 | Find voice calling | [CallController](../lib/core/calling/call_controller.dart), [CallScreen](../lib/features/calling/call_screen.dart) | [LocalAudioSession](../packages/offline_audio/lib/src/local_audio_session.dart), native `P2pObserver`. |
@@ -78,7 +78,7 @@ branded SkyChat.
 | [chat_history_repository.dart](../lib/core/history/chat_history_repository.dart) | Serialized local archive saves, loading/retry, deletion, retention and the Android history channel. |
 | [saved_conversation.dart](../lib/core/history/saved_conversation.dart) | Versioned archive models, strict decoding and bounded size accounting. |
 | [saved_chats_screen.dart](../lib/features/history/saved_chats_screen.dart) | Saved conversation list/detail, preserved drafts, storage error recovery and confirmed local deletion. |
-| [tcp_message_transport.dart](../lib/core/messaging/tcp_message_transport.dart) | Chat v3 implementation: sockets, frame parsing, participant identities, TLS handshake integration, host approvals, broadcasting, receipts, replay, request deduplication and directed call routing. |
+| [tcp_message_transport.dart](../lib/core/messaging/tcp_message_transport.dart) | Chat v3 implementation: sockets, frame parsing, participant identities, TLS handshake integration, automatic verified-contact admission, broadcasting, receipts, replay, request deduplication and directed call routing. |
 | [private_channel.dart](../lib/core/messaging/private_channel.dart) | TLS 1.3 client setup, host `SecurityContext` setup and certificate SHA-256 fingerprints. |
 | [message_transport.dart](../lib/core/messaging/message_transport.dart) | Small transport interface: host, connect, send, close and incoming stream. |
 | [chat_message.dart](../lib/core/models/chat_message.dart) | Accepted message model, canonical ID, group, sender, contact ID, timestamp and sequence. |
@@ -102,7 +102,7 @@ Within `TcpMessageTransport`, these methods form useful reading routes:
   public `_sendHello` -> `_listen` -> `_receive`.
 - Private proof exchange: `_openPrivateChannel`, `_authenticatePrivateHost`,
   `_hello`, then `ContactRepository`'s native signing/verifying calls.
-- Admission: `_hello` -> pending requests -> `approveJoin`/`rejectJoin` ->
+- Admission: `_hello` -> bound NFC proof and current contact verification ->
   `_completeHello` -> welcome, roster, replay and synced frames.
 - Message delivery: `send` -> `_accept` -> `_broadcast` -> `_receive` receipts ->
   `_publishDelivery`.
@@ -245,7 +245,7 @@ Existing documents provide deeper milestone detail:
 - [connectivity-contract.md](connectivity-contract.md): connectivity methods,
   snapshots and errors.
 - [private-group-security.md](private-group-security.md): current private
-  authentication, host approval and security limits.
+  authentication, automatic admission and security limits.
 - [chat-protocol.md](chat-protocol.md): frame semantics and recovery.
 - [delivery-receipts.md](delivery-receipts.md): receipt targeting and checkmarks.
 - [contact-security.md](contact-security.md): contact enrollment and key storage.

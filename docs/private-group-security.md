@@ -1,6 +1,6 @@
 # Private group access and encrypted transport
 
-Current implementation, 2026-11-23. This supersedes the NFC-invitation-only private
+Current implementation, 2026-11-25. This supersedes the NFC-invitation-only private
 group design. Physical Android acceptance remains required.
 
 ## Joining
@@ -14,13 +14,13 @@ group design. Physical Android acceptance remains required.
    Private records use discovery version 4 and omit username and contact fingerprint.
    Select a private group from the nearby list. Its host must be a verified contact;
    that identity is checked inside the encrypted connection, not trusted from DNS-SD.
-4. The client requests admission. The host sees its locally saved contact name and
-   chooses **Approve join** or **Decline join**, on Home or Chat. No participant
+4. The client proves its NFC contact identity. A currently verified, unblocked
+   contact joins automatically after the network connection. No participant
    identity, resume token, roster, retained history, messages or call relay access
-   is granted before approval. Pending requests expire after 60 seconds.
-5. Approval applies to this contact in this live chat group. A new hosted chat
-   starts with no approvals. Clients can retry or resume an approved membership
-   without another host decision while that membership remains valid.
+   is granted before contact authentication. There is no second chat approval.
+5. Any verified contact that connects can enter unless removed from this live
+   group. Clients retry or resume while their membership remains valid. Older
+   hosts can still send `approval_pending`; clients show a compatibility notice.
 
 ## Transport and authentication
 
@@ -49,8 +49,9 @@ All subsequent private frames, including admission decisions, resume tokens,
 messages, receipts, roster updates and call signaling, stay inside TLS. Resume
 requires a fresh contact proof and a token belonging to that same contact and
 group. A token alone cannot replace the identity proof. Removing a member revokes
-both its resume identity and group approval; a new admission requires another
-explicit host approval. A blocked/deleted contact cannot authenticate again.
+its resume identity and excludes its contact from this hosted group, including
+fresh sessions. Starting a new hosted group resets this exclusion. A
+blocked/deleted contact cannot authenticate again, including in subsequent groups.
 
 ## Boundaries
 
@@ -59,13 +60,14 @@ explicit host approval. A blocked/deleted contact cannot authenticate again.
 - Public groups retain their existing plaintext chat protocol and QR/NFC options.
   Public discovery records remain version 3; both phones need the updated app for
   private discovery and private TLS. Legacy private NFC invitations do not bypass
-  the new authentication or approval requirements.
+  contact authentication.
 - Anonymous application advertisements do not hide Wi-Fi radio activity, device
   addresses or the existence of a nearby group. A per-group label is linkable while
   that group exists. An active device that joins the Wi-Fi network can request a
-  TLS host proof, but cannot read private chat without contact trust and approval.
-- Contact verification survives app restarts. Group grants, resume tokens, TLS
-  keys and chat history remain in memory. A host restart ends the old conversation.
+  TLS host proof, but cannot read private chat without contact authentication.
+- Contact verification survives app restarts. Group exclusions, resume tokens and
+  TLS keys remain in memory. A host restart ends the old conversation. Local
+  encrypted history does not restore group membership; see [history](chat-history.md).
 - Application membership revocation does not evict the device from Wi-Fi itself.
   Network abuse and radio availability remain separate concerns.
 - The channel binding and admission protocol have automated coverage; no external
@@ -73,21 +75,21 @@ explicit host approval. A blocked/deleted contact cannot authenticate again.
 
 ## Validation
 
-Flutter socket tests cover pending admission without data exposure, approval and
-decline, grant reset for a new group, authenticated resume, missed-message replay,
+Flutter socket tests cover automatic admission without pre-authentication data,
+unknown contacts, exclusion reset for a new group, authenticated resume, missed-message replay,
 member removal, blocked peers, unknown hosts, wrong-certificate proofs, plaintext
-downgrade attempts and a stolen token presented by another approved contact.
-Widget tests cover both host decisions. Native tests exercise real ES256 proofs,
+downgrade attempts and a stolen token presented by another verified contact.
+Widget tests cover the absence of another host decision and older-host notices.
+Native tests exercise real ES256 proofs,
 context substitution, pinned identities, blocking, and ephemeral certificate/key
 generation. Existing chat, delivery, NFC and calling tests remain regression checks.
 
-Workspace verification: all 100 Flutter tests and 43 Android connectivity unit tests
-passed, Flutter analysis reported no issues, and the Android debug APK built.
 The wire-observer test confirms message text, authentication frames and resume
 credentials are not present as plaintext in the forwarded TLS bytes.
 
 On two physical Android phones: pair contacts once, discover an anonymous private
-group, verify no messages arrive before approval, approve/decline from both host
-screens, send both ways, call in both directions, disconnect/rejoin, remove an
-offline member, and repeat after creating a new group. Inspect discovery on a
+group, accept the Android network invitation and verify automatic chat entry.
+Check that unknown/blocked contacts receive no data, send both ways, call in both
+directions, disconnect/rejoin, remove an offline member and try a fresh session.
+Repeat after creating a new group. Inspect discovery on a
 third unpaired phone for absence of usernames and stable contact fingerprints.

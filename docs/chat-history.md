@@ -18,8 +18,8 @@ archive instead of being transferred to that new group.
 The live session, host replay journal, participant identities, admission state,
 Wi-Fi credentials, TLS keys, ordering counters and resume tokens still belong to
 the running process. None of those credentials is serialized by the archive.
-Private groups continue to require the existing NFC contact authentication and
-host approval. This feature does not change the chat wire protocol or iOS.
+Private groups require NFC contact authentication and admit verified contacts
+automatically after network connection. Archives do not bypass authentication.
 
 ## Storage and retention
 

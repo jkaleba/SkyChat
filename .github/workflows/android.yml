@@ -55,15 +55,17 @@ jobs:
       # clean checkout. Build before invoking the wrapper for native unit tests.
       - name: Build Android debug APK
         run: flutter build apk --debug --no-pub
-      - name: Test native Android connectivity
+      - name: Test native Android code
         working-directory: android
-        run: ./gradlew :offline_connectivity:testDebugUnitTest --no-daemon --console=plain
+        run: ./gradlew :app:testDebugUnitTest :offline_connectivity:testDebugUnitTest --no-daemon --console=plain
       - name: Save native test reports on failure
         if: ${{ failure() }}
         uses: actions/upload-artifact@v7
         with:
           name: android-native-test-reports
           path: |
+            build/app/reports/tests/testDebugUnitTest/
+            build/app/test-results/testDebugUnitTest/
             build/offline_connectivity/reports/tests/testDebugUnitTest/
             build/offline_connectivity/test-results/testDebugUnitTest/
           if-no-files-found: ignore

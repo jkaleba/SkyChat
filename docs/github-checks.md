@@ -4,7 +4,7 @@ Every pull request runs these workflows, including documentation-only changes:
 
 | Workflow | Required status check name | What it checks |
 | --- | --- | --- |
-| Android | `Android build and tests` | Dart analysis, Flutter application and connectivity adapter tests, a debug APK build, native Android connectivity unit tests |
+| Android | `Android build and tests` | Dart analysis, Flutter application and connectivity adapter tests, a debug APK build, native Android app and connectivity unit tests |
 | iOS prototype | `ios` | Signing helper tests, iOS Simulator build and native Swift protocol tests |
 
 Both workflows also support manual runs once their files are on the default

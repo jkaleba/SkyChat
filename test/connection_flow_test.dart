@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offline_connectivity/offline_connectivity.dart';
 import 'package:offline_group_messenger/app/app.dart';
+import 'support/configured_profile_store.dart';
 import 'package:offline_group_messenger/core/messaging/chat_session_controller.dart';
 import 'package:offline_group_messenger/core/messaging/tcp_message_transport.dart';
 import 'package:offline_group_messenger/features/home/home_screen.dart';
@@ -128,7 +129,12 @@ void main() {
     (tester) async {
       final connection = FakeConnection();
       addTearDown(connection.updates.close);
-      await tester.pumpWidget(MessengerApp(connectivity: connection));
+      await tester.pumpWidget(
+        MessengerApp(
+          connectivity: connection,
+          profileStore: const ConfiguredProfileStore(),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Create a group'));
       await tester.pumpAndSettle();
@@ -181,7 +187,12 @@ void main() {
   testWidgets('discovered peer passes its ID to join', (tester) async {
     final connection = FakeConnection();
     addTearDown(connection.updates.close);
-    await tester.pumpWidget(MessengerApp(connectivity: connection));
+    await tester.pumpWidget(
+      MessengerApp(
+        connectivity: connection,
+        profileStore: const ConfiguredProfileStore(),
+      ),
+    );
     await tester.pumpAndSettle();
     connection.updates.add(
       const GroupConnectionState(
@@ -210,7 +221,12 @@ void main() {
   testWidgets('permission denial leaves controls usable', (tester) async {
     final connection = FakeConnection()..denied = true;
     addTearDown(connection.updates.close);
-    await tester.pumpWidget(MessengerApp(connectivity: connection));
+    await tester.pumpWidget(
+      MessengerApp(
+        connectivity: connection,
+        profileStore: const ConfiguredProfileStore(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Create a group'));
     await tester.pumpAndSettle();

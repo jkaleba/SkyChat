@@ -27,12 +27,14 @@ class HomeScreen extends StatefulWidget {
     this.background = const BackgroundService(),
     this.contacts = const ContactRepository(),
     this.historyStorage,
+    this.initialUsername,
   });
   final OfflineConnectivity connectivity;
   final ChatSessionController? chat;
   final BackgroundService background;
   final ContactRepository contacts;
   final ChatHistoryStorage? historyStorage;
+  final String? initialUsername;
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -99,7 +101,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _chat.addListener(_membershipChanged);
     _incomingMessages = _chat.transport.incoming.listen(_onIncomingMessage);
-    unawaited(_loadUsername());
+    if (widget.initialUsername != null) {
+      _applyUsername(widget.initialUsername!);
+    } else {
+      unawaited(_loadUsername());
+    }
     unawaited(_loadVerifiedContacts());
     _load();
   }

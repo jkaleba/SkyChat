@@ -30,6 +30,10 @@ tokens. Both phones need this build. Group text is encrypted to the host, which
 forwards messages; physical-phone acceptance remains pending. See
 [private group security](docs/private-group-security.md).
 
+On Android, [first launch](docs/first-run.md) offers a display name or Guest and
+explains offline Wi-Fi use before opening group controls. Existing saved names
+skip setup, and permissions remain tied to the actions that need them.
+
 ## Weekly Updates
 
 ### Week 1

@@ -87,6 +87,8 @@ branded SkyChat.
 | [contact_repository.dart](../lib/core/contacts/contact_repository.dart) | Typed contact snapshots; pairing start/status/approve/stop; rename/block/delete/reset; private-channel and call sign/verify methods; saved-name resolution. |
 | [call_controller.dart](../lib/core/calling/call_controller.dart) | Verified online presence, signed directed control frames, invite/answer/end, call races, foreground handling and media ownership. |
 | [background_service.dart](../lib/core/background/background_service.dart) | Platform-channel wrapper for notification permission, service start/stop, message notifications and moving the task to background. |
+| [user_profile.dart](../lib/core/profile/user_profile.dart) | Local profile contract, name validation and native setup channel with legacy-adapter fallback. |
+| [first_run_gate.dart](../lib/features/onboarding/first_run_gate.dart) | First-run name/Guest choice, offline-use guidance, save/load retry and deferred home-screen construction. |
 
 Within `TcpMessageTransport`, these methods form useful reading routes:
 
@@ -162,6 +164,7 @@ Change an AID consistently in its Kotlin protocol and XML registration.
 | [OfflineAudioPlugin.kt](../packages/offline_audio/android/src/main/kotlin/com/offlinegroupmessenger/offline_audio/OfflineAudioPlugin.kt) | Enables WebRTC Wi-Fi Direct monitoring and exposes the audio method channel. |
 | [P2pObserver.kt](../packages/offline_audio/android/src/main/kotlin/com/offlinegroupmessenger/offline_audio/P2pObserver.kt) | Reads the existing group's actual interface, local/host address and prefix. Does not create, join or remove groups. |
 | [MainActivity.kt](../android/app/src/main/kotlin/com/offlinegroupmessenger/offline_group_messenger/MainActivity.kt) | Android Flutter host; background/notification channel, notification permission and username SharedPreferences. |
+| [UserProfileSetup.kt](../android/app/src/main/kotlin/com/offlinegroupmessenger/offline_group_messenger/UserProfileSetup.kt) | Native display-name normalization and protocol-compatible bounds. |
 | [SkyChatBackgroundService.kt](../android/app/src/main/kotlin/com/offlinegroupmessenger/offline_group_messenger/SkyChatBackgroundService.kt) | Foreground service notification and received-message notifications. Chat sockets remain in Dart. |
 | [App manifest](../android/app/src/main/AndroidManifest.xml) | Application/activity declaration, camera and notification permissions, `remoteMessaging` service and backup setting. |
 | [Audio manifest](../packages/offline_audio/android/src/main/AndroidManifest.xml) | Microphone/audio permissions. |
@@ -180,6 +183,7 @@ Change an AID consistently in its Kotlin protocol and XML registration.
 | `com.offlinegroupmessenger/history` | Method | `AndroidChatHistoryStorage` | `ChatHistoryBridge` |
 | `com.offlinegroupmessenger/audio` | Method | `readP2pNetwork` | `OfflineAudioPlugin` and `P2pObserver` |
 | `com.skychat/background` | Method | `BackgroundService` and username methods | `MainActivity` |
+| `com.skychat/profile` | Method | `AndroidUserProfileStore` | `MainActivity` serial background queue |
 
 These channels connect Flutter and Kotlin inside one phone. They are not network
 ports or protocols exchanged between phones. Port 45871 belongs to the chat

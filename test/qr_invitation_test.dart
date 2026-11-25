@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:offline_connectivity/offline_connectivity.dart';
 import 'package:offline_group_messenger/app/app.dart';
+import 'support/configured_profile_store.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'connection_flow_test.dart' show FakeConnection;
 
@@ -88,7 +89,12 @@ void main() {
   ) async {
     final connection = QrConnection();
     addTearDown(connection.updates.close);
-    await tester.pumpWidget(MessengerApp(connectivity: connection));
+    await tester.pumpWidget(
+      MessengerApp(
+        connectivity: connection,
+        profileStore: const ConfiguredProfileStore(),
+      ),
+    );
     await tester.pumpAndSettle();
     connection.updates.add(host);
     await tester.pumpAndSettle();
@@ -106,7 +112,12 @@ void main() {
   ) async {
     final connection = QrConnection()..delayed = Completer<GroupInvitation>();
     addTearDown(connection.updates.close);
-    await tester.pumpWidget(MessengerApp(connectivity: connection));
+    await tester.pumpWidget(
+      MessengerApp(
+        connectivity: connection,
+        profileStore: const ConfiguredProfileStore(),
+      ),
+    );
     await tester.pumpAndSettle();
     connection.updates.add(host);
     await tester.pumpAndSettle();
@@ -130,7 +141,12 @@ void main() {
       });
       final connection = QrConnection();
       addTearDown(connection.updates.close);
-      await tester.pumpWidget(MessengerApp(connectivity: connection));
+      await tester.pumpWidget(
+        MessengerApp(
+          connectivity: connection,
+          profileStore: const ConfiguredProfileStore(),
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text('Scan group QR code'),
@@ -182,7 +198,12 @@ void main() {
     });
     final connection = QrConnection();
     addTearDown(connection.updates.close);
-    await tester.pumpWidget(MessengerApp(connectivity: connection));
+    await tester.pumpWidget(
+      MessengerApp(
+        connectivity: connection,
+        profileStore: const ConfiguredProfileStore(),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Scan group QR code'),

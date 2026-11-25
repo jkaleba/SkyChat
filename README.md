@@ -34,6 +34,10 @@ On Android, [first launch](docs/first-run.md) offers a display name or Guest and
 explains offline Wi-Fi use before opening group controls. Existing saved names
 skip setup, and permissions remain tied to the actions that need them.
 
+The Android [Groups screen](docs/group-entry.md) separates creating a group from
+joining one. Nearby search, QR and supported NFC invitations are on the join
+page; an active group puts opening the chat first.
+
 ## Weekly Updates
 
 ### Week 1

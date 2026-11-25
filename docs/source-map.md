@@ -90,6 +90,11 @@ branded SkyChat.
 | [user_profile.dart](../lib/core/profile/user_profile.dart) | Local profile contract, name validation and native setup channel with legacy-adapter fallback. |
 | [first_run_gate.dart](../lib/features/onboarding/first_run_gate.dart) | First-run name/Guest choice, offline-use guidance, save/load retry and deferred home-screen construction. |
 
+Android group entry is described in [group navigation](group-entry.md).
+`HomeScreen` keeps live create/join routes in sync with its connection and chat
+state; shared builders render status, host invitations, saved conversations and
+nearby results. Native discovery and admission remain in the connectivity plugin.
+
 Within `TcpMessageTransport`, these methods form useful reading routes:
 
 - Server startup: `startHost` -> `_secureIncoming` for private TLS -> `_acceptSocket`.

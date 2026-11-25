@@ -81,6 +81,11 @@ void main() {
       ..requireContactAuth = true;
     await host.startHost(port: 0, address: '127.0.0.1');
     expect(host.status, ChatStatus.ready);
+    expect(
+      host.authenticatedHostContactId,
+      (await hostContacts.load()).identity,
+    );
+    expect(alice.authenticatedHostContactId, isNull);
   });
   tearDown(() {
     for (final peer in extraPeers) {
@@ -96,6 +101,7 @@ void main() {
     await until(() => host.joinRequests.isNotEmpty);
     await host.approveJoin(host.joinRequests.single.id);
     await until(() => alice.status == ChatStatus.ready);
+    expect(alice.authenticatedHostContactId, host.authenticatedHostContactId);
   }
 
   Future<_PrivatePeer> peer(PrivateContacts contacts) async {

@@ -7,6 +7,8 @@ import 'package:offline_connectivity/offline_connectivity.dart';
 import '../models/chat_message.dart';
 import '../models/message_delivery.dart';
 import '../models/participant.dart';
+import '../history/chat_history_repository.dart';
+import '../history/saved_conversation.dart';
 import 'tcp_message_transport.dart';
 
 enum DeliveryState { pending, confirmed, failed }
@@ -18,15 +20,18 @@ class SessionMessage {
   String? failure;
 }
 
-/// Conversation/UI state outlives sockets and navigation. All storage is in memory.
+/// Live session state outlives sockets and navigation; optional local archives
+/// preserve messages and drafts without restoring network access or membership.
 class ChatSessionController extends ChangeNotifier {
-  ChatSessionController({TcpMessageTransport? transport})
+  ChatSessionController({TcpMessageTransport? transport, this.history})
     : transport = transport ?? TcpMessageTransport() {
     this.transport.addListener(_changed);
     _incoming = this.transport.incoming.listen(_receive);
+    history?.addListener(_historyChanged);
   }
 
   final TcpMessageTransport transport;
+  final ChatHistoryRepository? history;
   late final StreamSubscription<ChatMessage> _incoming;
   final _history = <ChatMessage>[];
   final _outbox = <String, SessionMessage>{};
@@ -38,7 +43,60 @@ class ChatSessionController extends ChangeNotifier {
   bool _roleChanged = false;
   bool _disposed = false;
   int _generation = 0;
-  String draft = '';
+  String _draft = '';
+  String? _unboundDraftId;
+  String? _restoredDraftGroup;
+  String? _recoveredDraftMessageId;
+  static const recoveredSendWarning =
+      'This draft may already have reached the group. Check saved history before sending it again.';
+  bool _draftTouched = false;
+  bool _historyRefreshQueued = false;
+  String? _archiveGroupId;
+  String? _lastArchiveId;
+  bool? _archivePrivate;
+
+  String? get _archiveId {
+    final group = transport.groupId;
+    if (group == null) return null;
+    String id;
+    if (_isPrivateGroup) {
+      final host = transport.authenticatedHostContactId;
+      if (host == null) {
+        return _archiveGroupId == group && _archivePrivate == true
+            ? _lastArchiveId
+            : null;
+      }
+      id = ChatHistoryRepository.privateConversationId(group, host);
+    } else {
+      id = group;
+    }
+    _archiveGroupId = group;
+    _archivePrivate = _isPrivateGroup;
+    return _lastArchiveId = id;
+  }
+
+  String get draft => _draft;
+  set draft(String value) {
+    _draftTouched = true;
+    if (_draft == value) return;
+    _draft = value;
+    if (_recoveredDraftMessageId != null) {
+      _recoveredDraftMessageId = null;
+      if (sendError == recoveredSendWarning) sendError = null;
+    }
+    final saved = history;
+    if (saved == null) return;
+    final archive = _archiveId;
+    final id = archive ?? (_unboundDraftId ??= 'draft:${_newAdmissionToken()}');
+    saved.setDraft(
+      id,
+      _archiveTitle,
+      _isPrivateGroup,
+      value,
+      groupId: archive == null ? null : transport.groupId,
+    );
+  }
+
   String? sendError;
   String? _configurationError;
   GroupInvitation? _joinCandidate;
@@ -75,6 +133,7 @@ class ChatSessionController extends ChangeNotifier {
   ];
 
   void _changed() {
+    _syncSavedHistory();
     if (sessionEnded) {
       _rememberedPrivateGroup = null;
       _joinCandidate = null;
@@ -87,8 +146,109 @@ class ChatSessionController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  String get _archiveTitle {
+    final names = transport.participants
+        .where((peer) => peer.id != transport.selfId)
+        .map((peer) => peer.displayName)
+        .where((name) => name.isNotEmpty)
+        .take(3)
+        .join(', ');
+    final kind = _isPrivateGroup ? 'Private group' : 'Public group';
+    return names.isEmpty ? kind : '$kind · $names';
+  }
+
+  void _historyChanged() {
+    if (_disposed ||
+        _historyRefreshQueued ||
+        !networkConnected ||
+        status != ChatStatus.ready ||
+        history?.canSave != true ||
+        _restoredDraftGroup == _archiveId) {
+      return;
+    }
+    // Repository callbacks can occur while moving a draft. Defer restoration
+    // so a load/retry never re-enters the same repository mutation.
+    _historyRefreshQueued = true;
+    scheduleMicrotask(() {
+      _historyRefreshQueued = false;
+      if (!_disposed && _restoredDraftGroup != _archiveId) _changed();
+    });
+  }
+
+  void _syncSavedHistory() {
+    final saved = history;
+    final group = transport.groupId;
+    if (_disposed ||
+        saved == null ||
+        !saved.canSave ||
+        !networkConnected ||
+        group == null ||
+        status != ChatStatus.ready) {
+      return;
+    }
+    final archive = _archiveId;
+    if (archive == null) return;
+    if (_unboundDraftId != null) {
+      saved.moveDraft(
+        _unboundDraftId!,
+        archive,
+        _archiveTitle,
+        _isPrivateGroup,
+        groupId: group,
+      );
+      _unboundDraftId = null;
+    }
+    if (_restoredDraftGroup != archive) {
+      _restoredDraftGroup = archive;
+      // Group IDs are learned from the existing handshake. Never copy a draft
+      // into a different group, restore a membership, or send it automatically.
+      if (!_draftTouched && _draft.isEmpty) {
+        final conversation = saved.find(archive);
+        _draft = conversation?.draft ?? '';
+        final uncertain = conversation?.messages
+            .where(
+              (entry) =>
+                  entry.mine &&
+                  !entry.confirmed &&
+                  entry.message.text == _draft.trim(),
+            )
+            .firstOrNull;
+        if (uncertain != null) {
+          _recoveredDraftMessageId = uncertain.message.id;
+          sendError = recoveredSendWarning;
+        }
+      }
+    }
+    for (final entry in saved.find(archive)?.messages ?? <SavedChatMessage>[]) {
+      final receipt = transport.deliveryFor(entry.message.id);
+      if (entry.mine && receipt != null) {
+        saved.confirm(archive, entry.message.id, receipt.checks);
+      }
+    }
+  }
+
   void _receive(ChatMessage message) {
     if (_disposed || message.groupId != transport.groupId) return;
+    if (message.id == _recoveredDraftMessageId) {
+      _recoveredDraftMessageId = null;
+      if (sendError == recoveredSendWarning) sendError = null;
+    }
+    final archive = history == null ? null : _archiveId;
+    if (archive != null) {
+      history?.record(
+        archive,
+        _archiveTitle,
+        _isPrivateGroup,
+        SavedChatMessage(
+          message: message,
+          mine: message.senderId == transport.selfId,
+          confirmed: true,
+          checks: message.senderId == transport.selfId
+              ? (transport.deliveryFor(message.id)?.checks ?? 1)
+              : null,
+        ),
+      );
+    }
     _outbox.remove(message.id);
     if (!_history.any((m) => m.id == message.id)) {
       final index = message.sequence == 0
@@ -188,7 +348,15 @@ class ChatSessionController extends ChangeNotifier {
     _generation++;
     _history.clear();
     _outbox.clear();
-    draft = '';
+    // A new live session leaves previous conversations and drafts in the archive.
+    _draft = '';
+    _unboundDraftId = null;
+    _restoredDraftGroup = null;
+    _recoveredDraftMessageId = null;
+    _archiveGroupId = null;
+    _lastArchiveId = null;
+    _archivePrivate = null;
+    _draftTouched = false;
     _draftRequest = null;
     sendError = null;
     _configurationError = null;
@@ -354,11 +522,34 @@ class ChatSessionController extends ChangeNotifier {
     entry.delivery = DeliveryState.pending;
     entry.failure = null;
     sendError = null;
+    _recoveredDraftMessageId = null;
+    final archive = history == null ? null : _archiveId;
+    if (archive != null) {
+      history?.record(
+        archive,
+        _archiveTitle,
+        _isPrivateGroup,
+        SavedChatMessage(
+          message: ChatMessage(
+            id: id,
+            groupId: entry.message.groupId,
+            senderId: entry.message.senderId,
+            senderName: entry.message.senderName,
+            senderContactId: entry.message.senderContactId,
+            text: entry.message.text,
+            sentAt: entry.message.sentAt,
+          ),
+          mine: true,
+          confirmed: false,
+        ),
+      );
+    }
     _changed();
     try {
       await transport.send(entry.message);
       if (_disposed || generation != _generation) return;
       entry.delivery = DeliveryState.confirmed;
+      if (archive != null) history?.confirm(archive, id, 1);
     } catch (e) {
       if (_disposed || generation != _generation || !_outbox.containsKey(id)) {
         return;
@@ -377,6 +568,7 @@ class ChatSessionController extends ChangeNotifier {
     _disposed = true;
     _generation++;
     _incoming.cancel();
+    history?.removeListener(_historyChanged);
     transport.removeListener(_changed);
     transport.dispose();
     super.dispose();

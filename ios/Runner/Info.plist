@@ -4,10 +4,19 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan a group invitation QR code.</string>
+	<key>NFCReaderUsageDescription</key>
+	<string>Verify a nearby Android contact and read its SkyChat group invitation.</string>
+	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+	<array>
+		<string>F04F46464C494E4501</string>
+		<string>F04F46464C494E4502</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect directly to the nearby Android host for offline chat.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Offline Group Messenger</string>
+	<string>SkyChat</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

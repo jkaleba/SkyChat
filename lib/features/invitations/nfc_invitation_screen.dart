@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:offline_connectivity/offline_connectivity.dart';
@@ -11,10 +12,12 @@ class NfcInvitationScreen extends StatefulWidget {
     required this.connectivity,
     required this.sharing,
     this.privateGroup = false,
+    this.forIphone = false,
   });
   final OfflineConnectivity connectivity;
   final bool sharing;
   final bool privateGroup;
+  final bool forIphone;
 
   @override
   State<NfcInvitationScreen> createState() => _NfcInvitationScreenState();
@@ -60,7 +63,11 @@ class _NfcInvitationScreenState extends State<NfcInvitationScreen>
     });
     try {
       if (widget.sharing) {
-        await widget.connectivity.startNfcSharing();
+        if (widget.forIphone) {
+          await widget.connectivity.startIosNfcSharing();
+        } else {
+          await widget.connectivity.startNfcSharing();
+        }
         if (!mounted || token != _generation) return;
         setState(() {
           _starting = false;
@@ -131,6 +138,13 @@ class _NfcInvitationScreenState extends State<NfcInvitationScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Core NFC presents a system sheet, making Flutter inactive while scanning.
+    // Android retains its original focus-based cancellation behavior.
+    if (!widget.sharing &&
+        defaultTargetPlatform == TargetPlatform.iOS &&
+        state == AppLifecycleState.inactive) {
+      return;
+    }
     _foreground = state == AppLifecycleState.resumed;
     if (!_foreground) {
       _stop(

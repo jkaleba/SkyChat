@@ -45,7 +45,7 @@ this project rather than the latest available releases.
 | Dart hashing | `crypto` 3.0.8 resolved from `^3.0.6` | Computes SHA-256 of the TLS certificate for contact authentication. |
 | Voice media | `flutter_webrtc` 1.6.3; native `io.github.webrtc-sdk:android:150.7871.04` | Captures microphone audio, exchanges SDP/ICE and carries media with WebRTC. The local audio plugin enables Wi-Fi Direct network observation. |
 | Background chat support | Android `Service` and notification APIs | An app-owned foreground service shows connection status and message notifications. |
-| iOS host | Swift and the Flutter iOS scaffold | Shared UI exists, but the connectivity adapter reports `implementationReady=false`; iOS networking is not implemented. |
+| iOS client | Swift, Core NFC, CryptoKit, Keychain and Hotspot Configuration | Prototype reads Android NFC contacts in two taps and joins an Android-hosted chat by NFC invitation; no iPhone hosting, discovery or calling. macOS build and physical acceptance remain required; see [iPhone prototype](ios-prototype.md). |
 | Build and checks | Gradle, Android Gradle Plugin 9.1.1, Kotlin 2.1.0, Flutter tests, JUnit 4.13.2 | Both local Android plugins compile against SDK 36, declare minimum SDK 24 and use Java/JVM target 11. |
 
 Dependency declarations are in [pubspec.yaml](../pubspec.yaml),

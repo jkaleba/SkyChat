@@ -83,4 +83,61 @@ void main() {
     expect(calls.map((c) => c.method), ['getInvitation', 'joinInvitation']);
     expect(calls.last.arguments, validInvitation());
   });
+
+  test(
+    'iPhone private invitation contains an address but grants no membership',
+    () {
+      final map = validInvitation()
+        ..addAll({
+          'version': 3,
+          'privateGroup': true,
+          'hostAddress': '192.168.49.1',
+        });
+      final value = GroupInvitation.parse(jsonEncode(map));
+      expect(value.privateGroup, isTrue);
+      expect(value.admissionToken, isNull);
+      expect(value.hostAddress, '192.168.49.1');
+      expect(value.toMap(), map);
+      for (final address in [
+        null,
+        'localhost',
+        '127.0.0.1',
+        '8.8.8.8',
+        '192.168.49.999',
+        '192.168.049.1',
+      ]) {
+        expect(
+          () => GroupInvitation.fromMap({...map, 'hostAddress': address}),
+          throwsFormatException,
+        );
+      }
+      expect(
+        () => GroupInvitation.fromMap({...map, 'admissionToken': 'a' * 64}),
+        throwsFormatException,
+      );
+      expect(
+        () => GroupInvitation.fromMap({...map, 'version': 2}),
+        throwsFormatException,
+      );
+    },
+  );
+
+  test(
+    'iPhone sharing uses a separate method from existing Android invitations',
+    () async {
+      const channel = MethodChannel(OfflineConnectivity.channelName);
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final calls = <String>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call.method);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      const api = OfflineConnectivity();
+      await api.startNfcSharing();
+      await api.startIosNfcSharing();
+      expect(calls, ['startNfcSharing', 'startIosNfcSharing']);
+    },
+  );
 }

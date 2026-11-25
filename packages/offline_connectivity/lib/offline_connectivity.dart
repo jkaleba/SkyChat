@@ -58,6 +58,12 @@ class OfflineConnectivity {
   Future<void> startNfcSharing() =>
       _channel.invokeMethod<void>('startNfcSharing');
 
+  /// Additional host action for iPhone's ordinary Wi-Fi client connection.
+  /// Private invitations convey no membership grant; NFC contact proofs and
+  /// explicit host approval remain mandatory inside TLS.
+  Future<void> startIosNfcSharing() =>
+      _channel.invokeMethod<void>('startIosNfcSharing');
+
   /// Cancels reading, revokes sharing and clears native in-memory credentials.
   Future<void> stopNfc() => _channel.invokeMethod<void>('stopNfc');
 

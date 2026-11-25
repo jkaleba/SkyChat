@@ -12,7 +12,8 @@ internal class InvitationApdu(private val payload: () -> ByteArray?) {
             reset()
             return status(0x6985)
         }
-        if (command.contentEquals(SELECT)) {
+        // Accept Core NFC's standard SELECT with an optional trailing Le=00.
+        if (command.contentEquals(SELECT) || command.contentEquals(SELECT + byteArrayOf(0))) {
             selected = current
             return byteArrayOf((current.size shr 8).toByte(), current.size.toByte()) + status(0x9000)
         }

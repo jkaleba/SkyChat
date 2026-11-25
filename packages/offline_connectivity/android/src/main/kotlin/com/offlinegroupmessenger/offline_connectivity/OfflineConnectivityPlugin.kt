@@ -293,7 +293,7 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        if (call.method in listOf("startNfcSharing", "readNfcInvitation")) contacts.nfc.cancel()
+        if (call.method in listOf("startNfcSharing", "startIosNfcSharing", "readNfcInvitation")) contacts.nfc.cancel()
         when (call.method) {
             "getCapabilities" -> result.success(mapOf(
                 "platform" to "android", "wifiDirectSupported" to supported,
@@ -321,6 +321,7 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
                 }
             }
             "startNfcSharing" -> nfc.share(result) { getInvitation(it, viaNfc = true) }
+            "startIosNfcSharing" -> nfc.share(result) { getInvitation(it, viaNfc = true, forIphone = true) }
             "stopNfc" -> { nfc.cancel(); result.success(null) }
             "readNfcInvitation" -> {
                 if (!supported || Build.VERSION.SDK_INT < 29) {
@@ -606,9 +607,9 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
         else discovery?.stopSearch { issueAction() } ?: issueAction()
     }
 
-    private fun getInvitation(result: MethodChannel.Result, viaNfc: Boolean = false) {
+    private fun getInvitation(result: MethodChannel.Result, viaNfc: Boolean = false, forIphone: Boolean = false) {
         if (pending != null) { result.error("busy", "Another request is in progress.", null); return }
-        if (privateGroup && (!viaNfc || admissionToken == null)) {
+        if (privateGroup && (!viaNfc || (!forIphone && admissionToken == null))) {
             result.error("private_group", "Private groups use NFC invitations only. Recreate the group if its credentials were lost.", null); return
         }
         if (status != "connected" || !isHost || !permitted()) {
@@ -631,19 +632,23 @@ class OfflineConnectivityPlugin : FlutterPlugin, ActivityAware,
             mgr.requestGroupInfo(ch) { group ->
                 if (!attached || token != revision) return@requestGroupInfo
                 if (status != "connected" || !isHost || group == null || !group.isGroupOwner ||
-                    group.networkName.isNullOrEmpty() || group.passphrase.isNullOrEmpty()) {
+                    group.networkName.isNullOrEmpty() || group.passphrase.isNullOrEmpty() ||
+                    (forIphone && hostAddress.isNullOrEmpty())) {
                     fail("not_host", "The host group is no longer available. Create a group and retry.")
                 } else {
                     // Credentials are returned only on explicit request, never in state events or logs.
                     val payload = mutableMapOf<String, Any>(
-                        "app" to "offline-group-messenger", "version" to if (privateGroup) 2 else 1,
+                        "app" to "offline-group-messenger", "version" to if (privateGroup) { if (forIphone) 3 else 2 } else 1,
                         "transport" to "wifi-direct",
                         "networkName" to group.networkName, "passphrase" to group.passphrase
                     )
                     if (privateGroup) {
                         payload["privateGroup"] = true
-                        payload["admissionToken"] = requireNotNull(admissionToken)
+                        if (!forIphone) payload["admissionToken"] = requireNotNull(admissionToken)
                     }
+                    // Additive iPhone path only. Android P2P setup and existing
+                    // invitations remain unchanged; never guess the GO gateway.
+                    if (forIphone) payload["hostAddress"] = requireNotNull(hostAddress)
                     finish(payload)
                 }
             }

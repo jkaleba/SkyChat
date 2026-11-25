@@ -25,19 +25,26 @@ Codec: Flutter StandardMethodCodec.
 | getInvitation | none | Public host QR invitation; private hosts return private_group |
 | joinInvitation | invitation map | null when Android accepts credential-based joining (API 29+) |
 | startNfcSharing | none | null after current host credentials are fetched and HCE sharing enabled for up to 60 seconds |
+| startIosNfcSharing | none | Additional Android-host action: HCE sharing with actual hostAddress; private version 3 has no admission token and requires contact authentication plus host approval |
 | readNfcInvitation | none | Invitation JSON string after one successful ISO-DEP read; does not join |
 | stopNfc | none | null after sharing is revoked and pending reading cancelled |
 
 Android requests the appropriate runtime permission automatically before a
 connection command. Requests are serialized; concurrent commands fail with busy.
-getCapabilities does not request permission. Swift supports getCapabilities and
-returns unsupported for other methods; clients must check capabilities first.
+getCapabilities does not request permission. The Swift iPhone prototype supports
+getCapabilities, getState, readNfcInvitation, joinInvitation, stopNfc and disconnect.
+It reads NFC but does not share, host or discover Android P2P peers. Its
+implementationReady=true and wifiDirectSupported=false are independent: shared
+UI permits client joining through canJoinNfc. See [iPhone prototype](ios-prototype.md).
 Unknown methods return notImplemented.
 
 Capabilities include canJoinQr (true only on supported Android 10+ devices).
 Optional canShareNfc requires Wi-Fi Direct and NFC HCE support; canJoinNfc requires
 Wi-Fi Direct, NFC reader support and Android 10+. Missing values default to false.
 These flags describe hardware/API support, not whether the NFC toggle is enabled.
+On iPhone canJoinNfc checks Core NFC tag-reading availability; canShareNfc and
+canJoinQr are false for this prototype. A system NFC sheet may make Flutter
+inactive; only actual backgrounding cancels an iPhone scan.
 getInvitation requires the caller to already be the connected Group Owner; it
 queries WifiP2pGroup on demand. Credentials are never added to state snapshots.
 joinInvitation uses WifiP2pConfig.Builder with the SSID and password, avoiding

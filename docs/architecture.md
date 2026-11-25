@@ -5,7 +5,8 @@
 Flutter / Dart owns screens, themes, navigation, chat state, message models and
 the TCP messaging layer and call controller. Kotlin owns Android Wi-Fi Direct,
 NFC contact enrollment, Keystore identity and encrypted contact persistence.
-Swift owns future iOS connection integration. There is no cloud backend.
+Swift owns the iPhone client prototype (NFC reader, Keychain contacts and joining
+an Android host as an ordinary Wi-Fi client). There is no cloud backend.
 
 The app uses local Flutter plugins `packages/offline_connectivity` and
 `packages/offline_audio` (shared with Transport Lab for P2P observation and WebRTC).
@@ -21,10 +22,12 @@ https://docs.flutter.dev/platform-integration/platform-channels
 - Shared Material 3 home screen with light and dark themes.
 - Local plugin with a working getCapabilities method on both platforms.
 - Android checks whether Wi-Fi Direct hardware is advertised by the device.
-- Swift explicitly reports that the iOS connection adapter is not implemented.
+- Swift implements an iPhone NFC/Wi-Fi client prototype; see
+  [iPhone setup and acceptance](ios-prototype.md). Physical acceptance is pending.
 - Android implements create/discover/join/disconnect and reports
-  implementationReady=true. iOS remains false and rejects connection methods
-  with unsupported. This flag means the adapter is implemented, not that a
+  implementationReady=true. iOS reports implementationReady=true and
+  wifiDirectSupported=false: it reads NFC invitations and joins as an ordinary
+  Wi-Fi client, and does not host or use Android discovery. This flag means the adapter is implemented, not that a
   connection is established or that messaging exists.
 - ActivityAware handles runtime permission requests. The engine owns the receiver
   and P2P channel; activity resume refreshes system connection state. Detaching
@@ -101,10 +104,11 @@ multi-hop forwarding and background operation are separate milestones.
 
 ## Future iPhone support
 
-The Flutter GUI is already shared. Implement the Swift side of the same plugin
-when adding iOS networking; no Swift rewrite of the screens is needed.
-An iPhone may join an Android-hosted group as an ordinary Wi-Fi client. Test that
-on actual devices early; iOS does not expose Android's Wi-Fi Direct APIs.
+The Flutter GUI is shared. The [iPhone client prototype](ios-prototype.md) adds
+the Swift side of the same plugin. NFC pairs contacts in two taps, then a separate
+NFC group invitation carries Wi-Fi credentials and the actual host address.
+An iPhone attempts to join the Android group as an ordinary Wi-Fi client. Test
+on actual devices early; OEM interoperability is not established by source code.
 
 Shared Dart TCP code can then exchange the same messages with the Android host.
 The native connection method may differ, and user interaction may be necessary.

@@ -49,8 +49,10 @@ https://docs.flutter.dev/platform-integration/platform-channels
   Retry message preserves its request ID. Replay reconciles uncertain sends with
   host-accepted messages. No automatic resend of uncertain sends is performed.
 - Host departure or a changed host session ends the conversation. Explicit new
-  chat clears local history/draft/outbox; rejoining never silently sends them to
-  a different group. Everything remains in memory, scoped to this app process.
+  chat clears the live history/draft/outbox; rejoining never silently sends them
+  to a different group. Android separately archives messages and drafts in a
+  Keystore-encrypted local store. Network credentials and live session state
+  remain scoped to the process; archives never restore group access or resend.
   See chat-protocol.md for protocol v3, bounded replay and retry limitations.
 - Public host QR invitations use group network credentials fetched on explicit request.
   Android 10+ joins with WifiP2pConfig.Builder SSID/passphrase; discovery remains
@@ -77,7 +79,8 @@ C2 adds durable contacts and a separate mutual NFC verification flow. C3 uses
 with P2P-only WebRTC media outside the TCP chat queue. Contact signing keys and
 the AES-GCM store key stay in Android Keystore; only public contact data reaches
 Dart. Private chat uses authenticated TLS to the host; public chat remains plaintext.
-The host forwards and can read group text. History remains in memory. The audio plugin
+The host forwards and can read group text. Its replay journal remains in memory;
+Android separately retains [encrypted local archives](chat-history.md). The audio plugin
 observes the existing group and never removes it. C3 is foreground host/client
 calling; integrated hardware acceptance remains pending.
 BLE invitations and accepted-call temporary Wi-Fi Direct setup are future C4 work.

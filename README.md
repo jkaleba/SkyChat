@@ -12,6 +12,11 @@ Pull requests run Android builds/tests and iOS Simulator checks. See
 [required checks and merge protection](docs/github-checks.md) to require successful
 checks before merging into `master` and understand GitHub Actions allowances.
 
+Android keeps [encrypted saved conversations and drafts](docs/chat-history.md)
+across app restarts. Open **Groups > Saved conversations** to read or delete
+local history. Rejoining the same running chat restores its draft without
+automatically sending messages or restoring private-group membership.
+
 An [iPhone client prototype](docs/ios-prototype.md) adds NFC contact reading,
 mutual contact confirmation, and NFC invitations to join an Android host over
 ordinary Wi-Fi. It requires macOS/Xcode provisioning and physical iPhone/Android

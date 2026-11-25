@@ -9,6 +9,7 @@ import '../../core/messaging/chat_session_controller.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/models/participant.dart';
 import 'private_membership_panel.dart';
+import '../history/saved_chats_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -102,7 +103,7 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Start a new chat?'),
         content: const Text(
-          'This clears this phone\'s old history, draft and unconfirmed messages. They will not be sent to the new session.',
+          'Starts a separate conversation. Previous messages and drafts stay in saved history when local saving is enabled. Unconfirmed messages will not be sent to the new session.',
         ),
         actions: [
           TextButton(
@@ -450,6 +451,26 @@ class _ChatScreenState extends State<ChatScreen> {
                         },
                       ),
               ),
+              if (chat.history != null)
+                ListenableBuilder(
+                  listenable: chat.history!,
+                  builder: (context, _) => chat.history!.error == null
+                      ? const SizedBox.shrink()
+                      : TextButton.icon(
+                          icon: const Icon(Icons.error_outline),
+                          label: const Text(
+                            'Messages are not being saved. Manage history',
+                          ),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => SavedChatsScreen(
+                                history: chat.history!,
+                                contacts: widget.contacts,
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
               if (chat.sendError != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),

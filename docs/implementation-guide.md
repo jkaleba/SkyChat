@@ -527,7 +527,8 @@ require explicit retry; reconnecting does not silently resend drafts.
 
 If the host restarts, its previous group ID, approvals and tokens are gone. A
 changed host session ends the old conversation. Starting a new chat explicitly
-clears history, drafts and outbox. Changing Wi-Fi ownership does not migrate chat.
+clears the live history, draft and outbox while Android's saved archives remain
+available separately. Changing Wi-Fi ownership does not migrate chat.
 
 | Limit or deadline | Current implementation |
 | --- | --- |
@@ -610,7 +611,8 @@ Physical-device lifecycle and radio behavior require separate acceptance testing
 | Contact identity private key and store encryption key | Android Keystore until reset or app data loss. |
 | Contact public keys, names and trust state | Encrypted `noBackupFilesDir/contacts-v1.enc`; survive app restart. |
 | Wi-Fi invitation payload | Process memory during explicit sharing/reading; not written by the invitation implementation. |
-| Chat history, drafts, outbox, counters and resume tokens | Process memory for the current conversation. |
+| Saved chat messages, drafts and delivery-check snapshots | Android Keystore-encrypted `noBackupFilesDir/chat-history-v1.enc`; bounded local archives survive process restart. See [saved conversations](chat-history.md). |
+| Live outbox requests, ordering counters, resume tokens and host replay state | Process memory for the current conversation; archives do not resume or resend these requests. |
 | Private group approvals and pending requests | Host process memory for the current live group. |
 | Private TLS key and certificate | Host process memory for the current hosted chat. |
 | Voice | Live media; the app has no audio recording path. |

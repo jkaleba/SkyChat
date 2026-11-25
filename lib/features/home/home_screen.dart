@@ -16,6 +16,8 @@ import '../../core/background/background_service.dart';
 import '../../core/calling/call_controller.dart';
 import '../../core/contacts/contact_repository.dart';
 import '../../core/models/chat_message.dart';
+import '../../core/history/chat_history_repository.dart';
+import '../history/saved_chats_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -24,11 +26,13 @@ class HomeScreen extends StatefulWidget {
     this.chat,
     this.background = const BackgroundService(),
     this.contacts = const ContactRepository(),
+    this.historyStorage,
   });
   final OfflineConnectivity connectivity;
   final ChatSessionController? chat;
   final BackgroundService background;
   final ContactRepository contacts;
+  final ChatHistoryStorage? historyStorage;
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -61,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   final ValueNotifier<int> _uiRevision = ValueNotifier<int>(0);
   late final ChatSessionController _chat;
+  late final ChatHistoryRepository? _history;
   String _username = 'Guest';
 
   bool get _iosPrototype =>
@@ -76,9 +81,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _history =
+        widget.chat?.history ??
+        (widget.chat == null && widget.historyStorage != null
+            ? ChatHistoryRepository(widget.historyStorage!)
+            : null);
     _chat =
         widget.chat ??
         ChatSessionController(
+          history: _history,
           transport: TcpMessageTransport(
             contacts: widget.contacts,
             callCapable: defaultTargetPlatform != TargetPlatform.iOS,
@@ -278,6 +289,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && _history != null) {
+      unawaited(_history.flush());
+    }
     if (state == AppLifecycleState.resumed) {
       _inForeground = true;
       if (!_iosPrototype) _calls.foreground(true);
@@ -543,6 +557,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _subscription?.cancel();
     _chat.removeListener(_membershipChanged);
     if (widget.chat == null) _chat.dispose();
+    if (widget.chat == null) _history?.dispose();
     _uiRevision.dispose();
     super.dispose();
   }
@@ -626,6 +641,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (_history != null)
+          ListenableBuilder(
+            listenable: _history,
+            builder: (context, _) => Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: ListTile(
+                leading: const Icon(Icons.history),
+                title: const Text('Saved conversations'),
+                subtitle: Text(
+                  _history.loading
+                      ? 'Loading saved conversations…'
+                      : _history.error != null
+                      ? 'History needs attention. Tap to retry or manage saved data.'
+                      : '${_history.conversations.length} saved on this phone',
+                ),
+                trailing: Icon(
+                  _history.error == null
+                      ? Icons.chevron_right
+                      : Icons.error_outline,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => SavedChatsScreen(
+                      history: _history,
+                      contacts: widget.contacts,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         if (_iosPrototype)
           const Card(
             margin: EdgeInsets.only(bottom: 12),

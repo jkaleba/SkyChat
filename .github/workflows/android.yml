@@ -1,0 +1,70 @@
+name: Android
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android build and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle/wrapper/gradle-wrapper.properties
+            packages/**/android/*.gradle*
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.7'
+          channel: stable
+          cache: true
+      - name: Select the CI JDK for Flutter
+        run: flutter config --jdk-dir="$JAVA_HOME"
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Install connectivity test dependencies
+        working-directory: packages/offline_connectivity
+        run: flutter pub get
+      - name: Install lab analysis dependencies
+        working-directory: tools/transport_lab
+        run: flutter pub get
+      - name: Analyze Dart code
+        run: flutter analyze --no-pub
+      - name: Test Flutter application
+        run: flutter test --no-pub
+      - name: Test Flutter connectivity adapter
+        working-directory: packages/offline_connectivity
+        run: flutter test --no-pub
+      # Flutter generates the ignored Gradle wrapper and local.properties on a
+      # clean checkout. Build before invoking the wrapper for native unit tests.
+      - name: Build Android debug APK
+        run: flutter build apk --debug --no-pub
+      - name: Test native Android connectivity
+        working-directory: android
+        run: ./gradlew :offline_connectivity:testDebugUnitTest --no-daemon --console=plain
+      - name: Save native test reports on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-native-test-reports
+          path: |
+            build/offline_connectivity/reports/tests/testDebugUnitTest/
+            build/offline_connectivity/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 3

@@ -50,6 +50,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Join a group'));
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text('Find nearby groups'),
         180,
@@ -81,6 +83,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: HomeScreen(connectivity: connection)),
     );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Join a group'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Find nearby groups'),

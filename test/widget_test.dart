@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offline_connectivity/offline_connectivity.dart';
 import 'package:offline_group_messenger/app/app.dart';
+import 'support/configured_profile_store.dart';
 
 void main() {
   const channel = MethodChannel(OfflineConnectivity.channelName);
@@ -25,7 +26,9 @@ void main() {
               'description': 'iOS adapter pending.',
             },
           );
-      await tester.pumpWidget(const MessengerApp());
+      await tester.pumpWidget(
+        const MessengerApp(profileStore: ConfiguredProfileStore()),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('SkyChat'), findsOneWidget);
@@ -61,7 +64,9 @@ void main() {
             'description': 'Android adapter pending.',
           };
         });
-    await tester.pumpWidget(const MessengerApp());
+    await tester.pumpWidget(
+      const MessengerApp(profileStore: ConfiguredProfileStore()),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Could not check device support.'), findsOneWidget);
     await tester.tap(find.text('Try again'));

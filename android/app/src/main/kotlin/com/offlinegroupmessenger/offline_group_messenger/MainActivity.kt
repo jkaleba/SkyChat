@@ -9,6 +9,7 @@ import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMethodCodec
 
 class MainActivity : FlutterActivity() {
 
@@ -33,10 +34,40 @@ class MainActivity : FlutterActivity() {
     }
 
     private var pendingPermissionResult: MethodChannel.Result? = null
+    private var profileChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         SkyChatBackgroundService.ensureChannels(this)
+
+        val appContext = applicationContext
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
+        // The engine owns this serial background queue. Preference commits
+        // finish before replying, without disk I/O on the Android UI thread.
+        profileChannel = MethodChannel(messenger, "com.skychat/profile",
+            StandardMethodCodec.INSTANCE, messenger.makeBackgroundTaskQueue()).also { profile ->
+            profile.setMethodCallHandler { call, result ->
+                try {
+                    val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    when (call.method) {
+                        "load" -> {
+                            val name = UserProfileSetup.normalize(prefs.getString(KEY_USERNAME, null))
+                            // A valid existing nickname is already a configured profile.
+                            result.success(mapOf("username" to (name ?: ""), "configured" to (name != null)))
+                        }
+                        "complete" -> {
+                            val name = UserProfileSetup.normalize(call.argument<String>("name"))
+                            if (name == null) result.error("invalid_username", "Choose a name of up to 32 characters.", null)
+                            else if (prefs.edit().putString(KEY_USERNAME, name).commit()) result.success(null)
+                            else result.error("profile_storage_failed", "Your name could not be saved. Please retry.", null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (_: Exception) {
+                    result.error("profile_storage_failed", "Your profile could not be opened or saved. Please retry.", null)
+                }
+            }
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -116,6 +147,12 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        profileChannel?.setMethodCallHandler(null)
+        profileChannel = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     override fun onRequestPermissionsResult(

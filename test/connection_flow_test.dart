@@ -81,6 +81,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Join a group'));
+      await tester.pumpAndSettle();
       Future<void> chooseHost() async {
         connection.updates.add(
           const GroupConnectionState(
@@ -166,6 +168,14 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('Host IP: 192.168.88.7'), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('Connection details'),
+        150,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Connection details'));
+      await tester.pumpAndSettle();
       expect(find.text('Host IP: 192.168.88.7'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Disconnect'),
@@ -193,6 +203,8 @@ void main() {
         profileStore: const ConfiguredProfileStore(),
       ),
     );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Join a group'));
     await tester.pumpAndSettle();
     connection.updates.add(
       const GroupConnectionState(
@@ -259,7 +271,7 @@ void main() {
   });
 
   testWidgets(
-    'shows Current connection and discovery notice when connected, and Last connection with preserved privacy after disconnect',
+    'connected group opens chat and preserves privacy in the last conversation after disconnect',
     (tester) async {
       final connection = FakeConnection();
       final transport = _FakeHostTransport();
@@ -291,12 +303,12 @@ void main() {
       expect(find.text('Current connection'), findsOneWidget);
       expect(find.text('Current private group'), findsOneWidget);
       await tester.scrollUntilVisible(
-        find.text('Cannot discover groups while connected'),
+        find.text('Disconnect before creating or joining another group.'),
         150,
         scrollable: find.byType(Scrollable).first,
       );
       expect(
-        find.text('Cannot discover groups while connected'),
+        find.text('Disconnect before creating or joining another group.'),
         findsOneWidget,
       );
 
@@ -317,7 +329,10 @@ void main() {
       expect(find.text('Last connection'), findsOneWidget);
       expect(find.text('Last private group'), findsOneWidget);
       expect(find.text('Current connection'), findsNothing);
-      expect(find.text('Cannot discover groups while connected'), findsNothing);
+      expect(
+        find.text('Disconnect before creating or joining another group.'),
+        findsNothing,
+      );
     },
   );
 }

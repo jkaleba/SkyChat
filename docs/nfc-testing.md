@@ -78,8 +78,10 @@ malformed/oversized responses and cancellation between chunks. Flutter tests cov
 the typed bridge, capability defaults, join confirmation, Back cancellation,
 sharing expiry, host loss, background cleanup and disabled-NFC recovery.
 
-iOS remains unsupported; Core NFC reader interoperability and a compatible Wi-Fi
-join adapter are separate milestones. No iPhone tap support is claimed here.
+An iPhone reader/client prototype is now implemented in source. Its separate
+[Mac setup and physical acceptance procedure](ios-prototype.md) covers two-tap
+contact pairing and NFC group invitations. iPhone NFC and Wi-Fi interoperability
+are not established until that procedure passes on physical phones.
 
 References:
 - https://developer.android.com/develop/connectivity/nfc/hce

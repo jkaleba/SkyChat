@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:offline_connectivity/offline_connectivity.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../invitations/scan_invitation_screen.dart';
+import '../invitations/nfc_invitation_screen.dart';
 import '../../core/messaging/tcp_message_transport.dart';
 import '../../core/messaging/chat_session_controller.dart';
 import '../chat/chat_screen.dart';
@@ -61,6 +63,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   late final ChatSessionController _chat;
   String _username = 'Guest';
 
+  bool get _iosPrototype =>
+      _capabilities?.platform == 'ios' &&
+      (_capabilities?.implementationReady ?? false);
+
   @override
   void setState(VoidCallback fn) {
     super.setState(fn);
@@ -73,7 +79,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _chat =
         widget.chat ??
         ChatSessionController(
-          transport: TcpMessageTransport(contacts: widget.contacts),
+          transport: TcpMessageTransport(
+            contacts: widget.contacts,
+            callCapable: defaultTargetPlatform != TargetPlatform.iOS,
+          ),
         );
     _calls = CallController(_chat.transport)..addListener(_callChanged);
     WidgetsBinding.instance.addObserver(this);
@@ -133,6 +142,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _syncBackgroundService(GroupConnectionState state) {
+    if (_iosPrototype) return;
     if (state.status == GroupStatus.connected) {
       if (!_notificationPermissionRequested) {
         _notificationPermissionRequested = true;
@@ -181,7 +191,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       MaterialPageRoute<void>(
         builder: (_) => ContactsScreen(
           repository: widget.contacts,
-          calls: _calls,
+          calls: _iosPrototype ? null : _calls,
+          nfcReaderOnly: _iosPrototype,
           onUsernameChanged: _applyUsername,
         ),
       ),
@@ -209,10 +220,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           builder: (_) => ChatScreen(
             chat: _chat,
             contacts: widget.contacts,
-            openContacts: _capabilities?.platform == 'android'
+            openContacts: _capabilities?.platform == 'android' || _iosPrototype
                 ? _openContacts
                 : null,
-            openCall: _openCall,
+            openCall: _iosPrototype ? null : _openCall,
             removePrivateMember: _removePrivateMember,
           ),
         ),
@@ -269,7 +280,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _inForeground = true;
-      _calls.foreground(true);
+      if (!_iosPrototype) _calls.foreground(true);
     }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
@@ -327,9 +338,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await _subscription?.cancel();
       if (!mounted) return;
       _capabilities = capabilities;
+      if (_iosPrototype) _calls.foreground(false);
       if (!_modeSelected) _privateMode = false;
       if (capabilities.implementationReady &&
-          capabilities.wifiDirectSupported) {
+          (capabilities.wifiDirectSupported || _iosPrototype)) {
         _subscription = widget.connectivity.states.listen(
           (state) {
             if (mounted) {
@@ -471,8 +483,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _confirmInvitation(invitation);
   }
 
+  Future<void> _nfcInvitation({required bool sharing}) async {
+    final invitation = await Navigator.of(context).push<GroupInvitation>(
+      MaterialPageRoute(
+        builder: (_) => NfcInvitationScreen(
+          connectivity: widget.connectivity,
+          sharing: sharing,
+          privateGroup: sharing && _connection.privateGroup,
+          forIphone: sharing,
+        ),
+      ),
+    );
+    if (!sharing) await _confirmInvitation(invitation);
+  }
+
   Future<void> _confirmInvitation(GroupInvitation? invitation) async {
     if (invitation == null || !mounted) return;
+    if (_iosPrototype &&
+        invitation.privateGroup &&
+        _verifiedContactIds.isEmpty) {
+      setState(() => _error = 'Add the Android host in Contacts by NFC first.');
+      return;
+    }
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -519,7 +551,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       !_loading &&
       !_capabilityError &&
       (_capabilities?.implementationReady ?? false) &&
-      (_capabilities?.wifiDirectSupported ?? false);
+      ((_capabilities?.wifiDirectSupported ?? false) ||
+          (_iosPrototype && (_capabilities?.canJoinNfc ?? false)));
 
   bool get _occupied => {
     GroupStatus.connecting,
@@ -593,20 +626,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-              foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
-              child: const Icon(Icons.add),
+        if (_iosPrototype)
+          const Card(
+            margin: EdgeInsets.only(bottom: 12),
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Add the Android host in Contacts by NFC. Then ask the host to create a group and choose Invite iPhone by NFC. Keep SkyChat open while chatting.',
+              ),
             ),
-            title: const Text('Create a group'),
-            subtitle: const Text('Start a private or public group'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: _openCreateGroup,
           ),
-        ),
+        if (!_iosPrototype)
+          Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                foregroundColor: Theme.of(
+                  context,
+                ).colorScheme.onPrimaryContainer,
+                child: const Icon(Icons.add),
+              ),
+              title: const Text('Create a group'),
+              subtitle: const Text('Start a private or public group'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _openCreateGroup,
+            ),
+          ),
         if (!_ready || _error != null || _connection.status != GroupStatus.idle)
           Card(
             margin: const EdgeInsets.only(bottom: 12),
@@ -656,6 +702,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
+                        if (_capabilities?.canShareNfc ?? false)
+                          OutlinedButton.icon(
+                            onPressed: _running
+                                ? null
+                                : () => _nfcInvitation(sharing: true),
+                            icon: const Icon(Icons.nfc),
+                            label: const Text('Invite iPhone by NFC'),
+                          ),
                         if (!_connection.privateGroup)
                           OutlinedButton.icon(
                             onPressed: _running ? null : _showInvitation,
@@ -773,16 +827,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               'Available groups',
               style: Theme.of(context).textTheme.titleMedium,
             ),
-            TextButton.icon(
-              onPressed: canStart ? _findNearby : null,
-              icon: const Icon(Icons.search),
-              label: const Text('Find nearby groups'),
-            ),
+            if (!_iosPrototype)
+              TextButton.icon(
+                onPressed: canStart ? _findNearby : null,
+                icon: const Icon(Icons.search),
+                label: const Text('Find nearby groups'),
+              ),
             if (ready && (_capabilities?.canJoinQr ?? false))
               TextButton.icon(
                 onPressed: canStart ? _scanInvitation : null,
                 icon: const Icon(Icons.qr_code_scanner),
                 label: const Text('Scan group QR code'),
+              ),
+            if (_iosPrototype && (_capabilities?.canJoinNfc ?? false))
+              TextButton.icon(
+                onPressed: canStart
+                    ? () => _nfcInvitation(sharing: false)
+                    : null,
+                icon: const Icon(Icons.nfc),
+                label: const Text('Join group by NFC'),
               ),
           ],
         ),
@@ -851,11 +914,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 else if (remembered == null && peers.isEmpty)
                   Card(
                     margin: const EdgeInsets.only(bottom: 8),
-                    child: const ListTile(
+                    child: ListTile(
                       leading: CircleAvatar(child: Icon(Icons.wifi_tethering)),
-                      title: Text('No groups listed yet'),
+                      title: const Text('No groups listed yet'),
                       subtitle: Text(
-                        'Tap "Find nearby groups" to discover groups or use "Create a group" above.',
+                        _iosPrototype
+                            ? 'Use Join group by NFC with an Android host. Nearby Wi-Fi Direct discovery is available on Android.'
+                            : 'Tap "Find nearby groups" to discover groups or use "Create a group" above.',
                       ),
                     ),
                   ),
@@ -901,6 +966,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (ready &&
             _connection.status == GroupStatus.connected &&
             _connection.isHost) ...[
+          if (_capabilities?.canShareNfc ?? false)
+            OutlinedButton.icon(
+              onPressed: _running ? null : () => _nfcInvitation(sharing: true),
+              icon: const Icon(Icons.nfc),
+              label: const Text('Invite iPhone by NFC'),
+            ),
           if (!_connection.privateGroup)
             OutlinedButton.icon(
               onPressed: _running ? null : _showInvitation,
@@ -1105,7 +1176,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       0 => _buildGroupsTab(context),
                       1 => ContactsScreen(
                         repository: widget.contacts,
-                        calls: _calls,
+                        calls: _iosPrototype ? null : _calls,
+                        nfcReaderOnly: _iosPrototype,
                         embedded: true,
                         onUsernameChanged: _applyUsername,
                       ),
@@ -1124,22 +1196,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (index == 0) unawaited(_loadVerifiedContacts());
             if (index == 1) unawaited(_calls.refreshContacts());
           },
-          destinations: const [
-            NavigationDestination(
+          destinations: [
+            const NavigationDestination(
               icon: Icon(Icons.groups_outlined),
               selectedIcon: Icon(Icons.groups),
               label: 'Groups',
             ),
-            NavigationDestination(
+            const NavigationDestination(
               icon: Icon(Icons.contacts_outlined),
               selectedIcon: Icon(Icons.contacts),
               label: 'Contacts',
             ),
-            NavigationDestination(
-              icon: Icon(Icons.call_outlined),
-              selectedIcon: Icon(Icons.call),
-              label: 'Calls',
-            ),
+            if (!_iosPrototype)
+              const NavigationDestination(
+                icon: Icon(Icons.call_outlined),
+                selectedIcon: Icon(Icons.call),
+                label: 'Calls',
+              ),
           ],
         ),
       ),

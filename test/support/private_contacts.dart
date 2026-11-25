@@ -34,6 +34,7 @@ class PrivateContacts extends ContactRepository {
     final der = base64Decode(
       certificate
           .split('\n')
+          .map((line) => line.trim())
           .where((line) => line.isNotEmpty && !line.startsWith('-----'))
           .join(),
     );

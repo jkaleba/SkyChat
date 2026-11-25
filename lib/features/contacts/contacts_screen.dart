@@ -10,11 +10,13 @@ class ContactsScreen extends StatefulWidget {
     this.calls,
     this.embedded = false,
     this.onUsernameChanged,
+    this.nfcReaderOnly = false,
   });
   final ContactRepository repository;
   final CallController? calls;
   final bool embedded;
   final ValueChanged<String>? onUsernameChanged;
+  final bool nfcReaderOnly;
   @override
   State<ContactsScreen> createState() => _ContactsScreenState();
 }
@@ -103,6 +105,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           repository: widget.repository,
           username: _username,
           reader: reader,
+          twoTapPairing: widget.nfcReaderOnly,
         ),
       ),
     );
@@ -314,16 +317,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
         ),
         Row(
           children: [
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: busy || snapshot == null
-                    ? null
-                    : () => _openPairing(reader: false),
-                icon: const Icon(Icons.nfc),
-                label: const Text('Share contact'),
+            if (!widget.nfcReaderOnly)
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: busy || snapshot == null
+                      ? null
+                      : () => _openPairing(reader: false),
+                  icon: const Icon(Icons.nfc),
+                  label: const Text('Share contact'),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
+            if (!widget.nfcReaderOnly) const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: busy || snapshot == null
@@ -336,6 +340,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
           ],
         ),
         const SizedBox(height: 12),
+        if (widget.nfcReaderOnly)
+          const Text(
+            'On Android choose Share contact. On iPhone choose Add contact, compare the codes on both phones, confirm, then tap again to finish.',
+          ),
         if (snapshot?.contacts.isEmpty == true)
           const Text(
             'No contacts yet. Add someone by touching your phones together.',
@@ -400,10 +408,12 @@ class ContactPairingScreen extends StatefulWidget {
     required this.repository,
     required this.username,
     required this.reader,
+    this.twoTapPairing = false,
   });
   final ContactRepository repository;
   final String username;
   final bool reader;
+  final bool twoTapPairing;
   @override
   State<ContactPairingScreen> createState() => _ContactPairingScreenState();
 }
@@ -425,10 +435,8 @@ class _ContactPairingScreenState extends State<ContactPairingScreen>
   }
 
   Future<void> _start() => run(
-    () => widget.repository.startPairing(
-      widget.username,
-      reader: widget.reader,
-    ),
+    () =>
+        widget.repository.startPairing(widget.username, reader: widget.reader),
   );
 
   Future<void> poll() async {
@@ -456,7 +464,9 @@ class _ContactPairingScreenState extends State<ContactPairingScreen>
       if (mounted) {
         setState(
           () => error =
-              'Pairing failed. Enable NFC, keep both phones unlocked, and start again.',
+              widget.twoTapPairing
+                  ? 'Pairing failed. Keep both phones unlocked, open Share contact on Android, and start again.'
+                  : 'Pairing failed. Enable NFC, keep both phones unlocked, and start again.',
         );
       }
     } finally {
@@ -519,9 +529,12 @@ class _ContactPairingScreenState extends State<ContactPairingScreen>
       return (
         icon: Icons.hourglass_top,
         title: 'Step 3 of 3 · Waiting for the other phone',
-        description:
-            'You confirmed on this phone. Keep both phones touching until the other person confirms so the receipt can be exchanged over NFC.',
-        touchStatus: 'Keep phones touching',
+        description: widget.twoTapPairing
+            ? 'Confirm the same code on Android, then hold the top of this iPhone near it again to exchange confirmations.'
+            : 'You confirmed on this phone. Keep both phones touching until the other person confirms so the receipt can be exchanged over NFC.',
+        touchStatus: widget.twoTapPairing
+            ? 'Tap the same Android phone again'
+            : 'Keep phones touching',
         isError: false,
         isComplete: false,
       );
@@ -531,9 +544,12 @@ class _ContactPairingScreenState extends State<ContactPairingScreen>
       return (
         icon: Icons.verified_user_outlined,
         title: 'Step 2 of 3 · Compare verification code',
-        description:
-            'Connected with $peerName. Keep both phones touching while you compare the code below and tap confirm.',
-        touchStatus: 'Keep phones touching',
+        description: widget.twoTapPairing
+            ? 'Connected with $peerName. Separate the phones, compare the full code on both screens, and confirm on both. Then tap again to save the contact.'
+            : 'Connected with $peerName. Keep both phones touching while you compare the code below and tap confirm.',
+        touchStatus: widget.twoTapPairing
+            ? 'Compare codes before the second tap'
+            : 'Keep phones touching',
         isError: false,
         isComplete: false,
       );
@@ -542,7 +558,9 @@ class _ContactPairingScreenState extends State<ContactPairingScreen>
       return (
         icon: Icons.nfc,
         title: 'Step 1 of 3 · Waiting for NFC tap',
-        description: widget.reader
+        description: widget.twoTapPairing
+            ? 'On Android open Share contact. Hold the top of this iPhone near the Android NFC antenna. Finish both taps within 60 seconds.'
+            : widget.reader
             ? 'Hold the backs of both phones together to receive their contact. Pairing expires after 60 seconds.'
             : 'Hold the backs of both phones together to share your contact (${widget.username}). Pairing expires after 60 seconds.',
         touchStatus: 'Hold phones together',
@@ -599,8 +617,9 @@ class _ContactPairingScreenState extends State<ContactPairingScreen>
                       Expanded(
                         child: Text(
                           summary.title,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(color: onCardColor),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.titleMedium?.copyWith(color: onCardColor),
                         ),
                       ),
                     ],
@@ -626,8 +645,9 @@ class _ContactPairingScreenState extends State<ContactPairingScreen>
                       Expanded(
                         child: Text(
                           summary.touchStatus,
-                          style: Theme.of(context).textTheme.labelLarge
-                              ?.copyWith(color: onCardColor),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.labelLarge?.copyWith(color: onCardColor),
                         ),
                       ),
                     ],

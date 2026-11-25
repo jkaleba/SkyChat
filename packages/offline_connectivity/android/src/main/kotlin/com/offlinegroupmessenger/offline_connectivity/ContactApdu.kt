@@ -8,7 +8,8 @@ internal class ContactApdu(private val exchange: (ByteArray) -> ByteArray) {
     private var response = ByteArray(0)
     @Synchronized fun reset() { selected = false; request = ByteArray(0); response = ByteArray(0); written = 0 }
     @Synchronized fun respond(command: ByteArray): ByteArray = try {
-        if (command.contentEquals(SELECT)) { reset(); selected = true; ok() }
+        // Core NFC may append the standard Le=00 byte to SELECT (case 4).
+        if (command.contentEquals(SELECT) || command.contentEquals(SELECT + byteArrayOf(0))) { reset(); selected = true; ok() }
         else {
             require(selected && command.size >= 5 && command[0] == 0.toByte())
             val offset = ((command[2].toInt() and 255) shl 8) or (command[3].toInt() and 255)

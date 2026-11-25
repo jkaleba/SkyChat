@@ -29,7 +29,7 @@ SkyChat/
 |   |   |-- android/src/main/kotlin/   Android P2P, NFC, contacts and security
 |   |   |-- android/src/main/res/xml/  NFC HCE AID registration
 |   |   |-- android/src/test/kotlin/   Native JVM protocol and state tests
-|   |   |-- ios/Classes/              Swift connectivity stub
+|   |   |-- ios/Classes/              iPhone NFC/Wi-Fi client and contact proofs
 |   |   `-- test/                     Dart bridge and invitation tests
 |   `-- offline_audio/                Shared WebRTC audio plugin
 |       |-- lib/                      Media lifecycle and ICE filtering
@@ -160,7 +160,10 @@ Change an AID consistently in its Kotlin protocol and XML registration.
 | [SkyChatBackgroundService.kt](../android/app/src/main/kotlin/com/offlinegroupmessenger/offline_group_messenger/SkyChatBackgroundService.kt) | Foreground service notification and received-message notifications. Chat sockets remain in Dart. |
 | [App manifest](../android/app/src/main/AndroidManifest.xml) | Application/activity declaration, camera and notification permissions, `remoteMessaging` service and backup setting. |
 | [Audio manifest](../packages/offline_audio/android/src/main/AndroidManifest.xml) | Microphone/audio permissions. |
-| [Swift connectivity plugin](../packages/offline_connectivity/ios/Classes/OfflineConnectivityPlugin.swift) | Reports unsupported iOS connectivity; replace the stub here when implementing that adapter. |
+| [Swift connectivity plugin](../packages/offline_connectivity/ios/Classes/OfflineConnectivityPlugin.swift) | iPhone NFC invitations, client-only Wi-Fi association, authoritative host reachability and connection events. |
+| [iPhone contact vault](../packages/offline_connectivity/ios/Classes/ContactVault.swift) | Device-only Keychain persistence, Android-compatible P-256/SPKI/JWS and private TLS proof validation. |
+| [iPhone contact pairing](../packages/offline_connectivity/ios/Classes/ContactPairing.swift) | Reader-side mutual NFC proof and confirmation state across two taps. |
+| [iPhone NFC reader](../packages/offline_connectivity/ios/Classes/NFCReader.swift) | Core NFC lifecycle and bounded Android-compatible ISO 7816 APDU exchanges. |
 
 ## Platform channel reference
 

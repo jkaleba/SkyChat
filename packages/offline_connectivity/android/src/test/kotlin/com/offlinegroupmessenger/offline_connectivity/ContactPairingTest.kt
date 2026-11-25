@@ -4,6 +4,37 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ContactPairingTest {
+    @Test fun transcriptSerializationMatchesTheIosJsonContract() {
+        // Names intentionally exercise Unicode and slash escaping across platforms.
+        val fields = listOf("ogm-nfc-contact-v1", "key", "A/B Żółw 👋", "nonce", "hostkey", "Host", "nonce")
+        assertEquals("""{"fields":["ogm-nfc-contact-v1","key","A/B Żółw 👋","nonce","hostkey","Host","nonce"]}""",
+            com.nimbusds.jose.util.JSONObjectUtils.toJSONString(mapOf("fields" to fields)))
+    }
+
+    @Test fun iphoneTwoTapExchangeKeepsApprovalAcrossApduReselection() {
+        val a = testCrypto(); val b = testCrypto()
+        val readerBook = ContactBook(a, null) {}; val hostBook = ContactBook(b, null) {}
+        val reader = ContactPairing(readerBook, "iPhone", true)
+        val host = ContactPairing(hostBook, "Android", false)
+        val apdu = ContactApdu { request ->
+            com.nimbusds.jose.util.JSONObjectUtils.toJSONString(host.handle(
+                com.nimbusds.jose.util.JSONObjectUtils.parse(request.toString(Charsets.UTF_8))))
+                .toByteArray(Charsets.UTF_8)
+        }
+        fun exchange(value: Map<String, Any?>): Map<String, Any?> = com.nimbusds.jose.util.JSONObjectUtils.parse(
+            ContactApdu.request(com.nimbusds.jose.util.JSONObjectUtils.toJSONString(value).toByteArray(Charsets.UTF_8), apdu::respond)
+                .toString(Charsets.UTF_8))
+        assertArrayEquals(byteArrayOf(0x90.toByte(), 0), apdu.respond(ContactApdu.SELECT + byteArrayOf(0)))
+        assertEquals("ready", exchange(reader.receiveHostProof(exchange(reader.hello())))["type"])
+        apdu.reset() // iOS closes its system sheet so both users can compare codes.
+        assertEquals("pending", hostBook.entry(a.id)!!["state"])
+        host.approve(); reader.approve()
+        assertArrayEquals(byteArrayOf(0x90.toByte(), 0), apdu.respond(ContactApdu.SELECT + byteArrayOf(0)))
+        reader.receiveConfirmation(exchange(reader.poll()))
+        assertEquals("verified", readerBook.entry(b.id)!!["state"])
+        assertEquals("verified", hostBook.entry(a.id)!!["state"])
+    }
+
     @Test fun mutualProofAndBothApprovalsAreRequired() {
         val a = testCrypto(); val b = testCrypto()
         val ab = ContactBook(a, null) {}; val bb = ContactBook(b, null) {}

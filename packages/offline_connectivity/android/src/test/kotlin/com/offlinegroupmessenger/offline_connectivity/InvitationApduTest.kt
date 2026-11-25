@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InvitationApduTest {
+    @Test fun coreNfcSelectWithLeCanReadTheInvitation() {
+        val data = "iphone invitation".toByteArray()
+        val host = InvitationApdu { data }
+        val header = host.respond(InvitationApdu.SELECT + byteArrayOf(0))
+        assertArrayEquals(byteArrayOf(0, data.size.toByte(), 0x90.toByte(), 0), header)
+        assertArrayEquals(data + byteArrayOf(0x90.toByte(), 0),
+            host.respond(byteArrayOf(0, 0xB0.toByte(), 0, 0, data.size.toByte())))
+    }
+
     @Test fun roundTripUsesBoundedChunksIncludingUnicode() {
         val data = ("Group żółw 👋 " + "x".repeat(500)).toByteArray(Charsets.UTF_8)
         val host = InvitationApdu { data }

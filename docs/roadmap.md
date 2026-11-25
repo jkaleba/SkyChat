@@ -37,7 +37,9 @@ coexistence validation plus its private discovery/credential-channel design firs
 ## 1. Align documentation (complete)
 
 Record the existing Android Wi-Fi Direct, QR/NFC invitation and TCP chat features;
-remove obsolete claims that chat is missing. iOS remains a capability stub.
+remove obsolete claims that chat is missing. The original iOS capability stub
+now has an [NFC client prototype](ios-prototype.md); iOS compilation and physical
+interoperability remain acceptance gates.
 
 ## 2. Reliable session recovery (implemented; hardware validation outstanding)
 

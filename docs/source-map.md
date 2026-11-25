@@ -75,6 +75,9 @@ branded SkyChat.
 | --- | --- |
 | [home_screen.dart](../lib/features/home/home_screen.dart) | Groups/Contacts/Calls navigation; `_load` subscribes to connectivity, `_buildPeerCard` joins nearby groups, `_confirmInvitation` confirms credential joins, `_syncBackgroundService` starts service support. |
 | [chat_session_controller.dart](../lib/core/messaging/chat_session_controller.dart) | Keeps history, draft and outbox across navigation/socket loss. Follow `configureGroup`, `prepareJoin`, `prepareNearbyJoin`, `updateConnection`, `retry`, `sendDraft`, `retryMessage`, `leave` and `beginNewSession`. |
+| [chat_history_repository.dart](../lib/core/history/chat_history_repository.dart) | Serialized local archive saves, loading/retry, deletion, retention and the Android history channel. |
+| [saved_conversation.dart](../lib/core/history/saved_conversation.dart) | Versioned archive models, strict decoding and bounded size accounting. |
+| [saved_chats_screen.dart](../lib/features/history/saved_chats_screen.dart) | Saved conversation list/detail, preserved drafts, storage error recovery and confirmed local deletion. |
 | [tcp_message_transport.dart](../lib/core/messaging/tcp_message_transport.dart) | Chat v3 implementation: sockets, frame parsing, participant identities, TLS handshake integration, host approvals, broadcasting, receipts, replay, request deduplication and directed call routing. |
 | [private_channel.dart](../lib/core/messaging/private_channel.dart) | TLS 1.3 client setup, host `SecurityContext` setup and certificate SHA-256 fingerprints. |
 | [message_transport.dart](../lib/core/messaging/message_transport.dart) | Small transport interface: host, connect, send, close and incoming stream. |
@@ -135,6 +138,8 @@ These use the same Kotlin directory as the connectivity files above.
 | [ContactCrypto.kt](../packages/offline_connectivity/android/src/main/kotlin/com/offlinegroupmessenger/offline_connectivity/ContactCrypto.kt) | Public key encoding, fingerprints, nonces and Nimbus ES256 JWS signing/verifying. |
 | [ContactBook.kt](../packages/offline_connectivity/android/src/main/kotlin/com/offlinegroupmessenger/offline_connectivity/ContactBook.kt) | Contact records and trust transitions; signing/verifying private-channel proofs and call control; enforcing verified/unblocked peers. |
 | [ContactVault.kt](../packages/offline_connectivity/android/src/main/kotlin/com/offlinegroupmessenger/offline_connectivity/ContactVault.kt) | Android Keystore aliases, encrypted contact file, atomic writes, reset and process-wide contact book. |
+| [ChatHistoryBridge.kt](../packages/offline_connectivity/android/src/main/kotlin/com/offlinegroupmessenger/offline_connectivity/ChatHistoryBridge.kt) | Serialized history channel, separate Keystore key, encrypted atomic file in no-backup storage and explicit reset. |
+| [HistoryCipher.kt](../packages/offline_connectivity/android/src/main/kotlin/com/offlinegroupmessenger/offline_connectivity/HistoryCipher.kt) | Bounded AES-GCM envelope, authenticated format version and tamper rejection. |
 | [PrivateChannelCertificate.kt](../packages/offline_connectivity/android/src/main/kotlin/com/offlinegroupmessenger/offline_connectivity/PrivateChannelCertificate.kt) | Generates temporary software TLS key/certificate and returns PEM plus fingerprint to Dart. |
 | [NfcInvitationController.kt](../packages/offline_connectivity/android/src/main/kotlin/com/offlinegroupmessenger/offline_connectivity/NfcInvitationController.kt) | Retained group invitation reader/sharer; foreground lifecycle, 60-second sharing, 30-second reading and cleanup. |
 | [NfcInvitationService.kt](../packages/offline_connectivity/android/src/main/kotlin/com/offlinegroupmessenger/offline_connectivity/NfcInvitationService.kt) | Invitation HCE service and process-memory `NfcInvitationStore`; unlocked/interactive checks and payload expiry. |
@@ -172,6 +177,7 @@ Change an AID consistently in its Kotlin protocol and XML registration.
 | `com.offlinegroupmessenger/connectivity` | Method | `OfflineConnectivity` | `OfflineConnectivityPlugin` |
 | `com.offlinegroupmessenger/connectivity/events` | Event | `OfflineConnectivity.states` | `OfflineConnectivityPlugin` snapshots |
 | `com.offlinegroupmessenger/contacts` | Method | `ContactRepository` | `ContactsBridge` |
+| `com.offlinegroupmessenger/history` | Method | `AndroidChatHistoryStorage` | `ChatHistoryBridge` |
 | `com.offlinegroupmessenger/audio` | Method | `readP2pNetwork` | `OfflineAudioPlugin` and `P2pObserver` |
 | `com.skychat/background` | Method | `BackgroundService` and username methods | `MainActivity` |
 

@@ -42,7 +42,8 @@ build/commit, joining method and outcome for each run.
     ending frame arrives. Force-stopping/range loss can only show disconnected
     until a reconnect establishes whether the old session still exists. A restarted
     host rejects the old resume attempt; Start new chat requires confirmation and
-    clears old local history/draft/outbox without sending them to the new group.
+    clears old live history/draft/outbox without sending them to the new group.
+    Android's saved archives remain separately available.
 11. Repeat with mobile data enabled to check physical-device Wi-Fi Direct routing.
 
 Automated tests use real loopback sockets, three-party broadcasts and a proxy that
@@ -138,7 +139,10 @@ two-phone group both senders reach three checks when the other phone receives it
   participants. At capacity, new joins require the host to start a new session.
 - 500 host text messages available for replay; 1000 accepted requests cached.
 - Each phone retains 500 messages/notices for display and up to 50 unconfirmed
-  outgoing entries. Drafts, counters, credentials and caches are in memory only.
+  outgoing entries in the live session. Android additionally keeps bounded,
+  encrypted local archives of messages, drafts and delivery-check snapshots;
+  see [saved conversations](chat-history.md). Counters, credentials and replay
+  caches are not persisted by this archive.
 - Initial TCP connection retries up to five times (2-second timeout, 500 ms delay).
   Synchronization has a 5-second timeout; host confirmation has a 6-second timeout.
 - Native client network restoration attempts resumption. TCP-only failure offers
@@ -148,7 +152,8 @@ two-phone group both senders reach three checks when the other phone receives it
   credentials. Explicitly rejoining the same running group resumes it, just like
   temporary network loss. Creating a group or explicitly starting a new chat clears
   old conversation state. Host loss ends the host session; changing roles does not
-  migrate it. Process restart still loses all in-memory state.
+  migrate it. Process restart loses the live session and its resume credentials;
+  Android's local archives and drafts survive separately without restoring access.
 - Join/leave notices reflect locally observed rosters and are not replayed events.
 
 ## Security and platform limits

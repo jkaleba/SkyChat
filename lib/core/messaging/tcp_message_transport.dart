@@ -122,6 +122,14 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   ChatStatus status = ChatStatus.offline;
   int? get listeningPort => _server?.port;
   String? get groupId => _groupId;
+
+  /// Public contact identity proven by the existing private-channel handshake.
+  String? get authenticatedHostContactId =>
+      _isHost && requireVerifiedContact && _privateContext != null
+      ? _hostContactId
+      : requireContactAuth && _authenticatedPrivateHost
+      ? _pinnedHostContactId
+      : null;
   List<ChatMessage> get messages => List.unmodifiable(_messages);
   List<Participant> get participants => List.unmodifiable(_participants);
   bool get canManagePrivateMembers =>

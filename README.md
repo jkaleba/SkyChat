@@ -8,6 +8,10 @@ For the technologies, NFC payloads, Wi-Fi Direct setup, private authentication,
 chat and call flows, see the [implementation guide](docs/implementation-guide.md).
 The [source map](docs/source-map.md) lists the files and methods for each feature.
 
+Pull requests run Android builds/tests and iOS Simulator checks. See
+[required checks and merge protection](docs/github-checks.md) to require successful
+checks before merging into `master` and understand GitHub Actions allowances.
+
 An [iPhone client prototype](docs/ios-prototype.md) adds NFC contact reading,
 mutual contact confirmation, and NFC invitations to join an Android host over
 ordinary Wi-Fi. It requires macOS/Xcode provisioning and physical iPhone/Android

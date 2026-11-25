@@ -19,3 +19,8 @@ local.properties
 **/Flutter/Generated.xcconfig
 **/Flutter/flutter_export_environment.sh
 .DS_Store
+.private/
+*.p12
+*.p8
+*.mobileprovision
+*.certSigningRequest

@@ -7,10 +7,15 @@ or promise background message delivery. Keep SkyChat open on both phones.
 
 Source implementation and automated Flutter/Android checks are separate from
 iOS compilation and physical-device acceptance. This Windows workspace cannot
-run Xcode. Run the native protocol tests on a Mac using Xcode and Simulator.
-Simulator tests cannot establish NFC/radio interoperability.
+run Xcode. The `iOS prototype` GitHub workflow builds on macOS and runs native
+protocol tests on Simulator when invoked or attached to a pull request. Neither
+Simulator nor the workflow can establish NFC/radio interoperability.
 
 ## Build on a Mac
+
+If your computer runs Windows, use the [GitHub Actions → TestFlight setup](ios-github-actions.md).
+The unsigned simulator workflow needs no Apple account. Signing and TestFlight
+require an Apple Developer Program team with the NFC/Hotspot capabilities.
 
 1. Use Flutter 3.35.7, Xcode, CocoaPods, and an iPhone with iOS 15 or newer and NFC
    ISO 7816 tag-reading support. Use a physical Android phone supporting NFC HCE

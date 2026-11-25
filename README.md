@@ -12,6 +12,8 @@ An [iPhone client prototype](docs/ios-prototype.md) adds NFC contact reading,
 mutual contact confirmation, and NFC invitations to join an Android host over
 ordinary Wi-Fi. It requires macOS/Xcode provisioning and physical iPhone/Android
 acceptance; iOS compilation and radio interoperability are not established here.
+The [Windows-to-TestFlight guide](docs/ios-github-actions.md) covers GitHub Actions,
+Windows certificate generation, signing secrets and installing on iPhone.
 
 Private groups now use one-time NFC contact verification, anonymous nearby group
 labels, explicit host approval and contact-authenticated TLS 1.3, including resume

@@ -63,8 +63,8 @@ https://docs.flutter.dev/platform-integration/platform-channels
   timeouts and cancellation. InvitationApdu is a pure Kotlin protocol with JVM
   tests. Both QR and NFC return the same validated GroupInvitation and require
   the same confirmation before joinInvitation. No NFC chat transport is added.
-- Private groups require NFC-verified contacts, TLS 1.3 and explicit host approval
-  for each live chat. Resume requires a fresh contact proof and a matching member
+- Private groups require NFC-verified contacts and TLS 1.3. Verified contacts enter
+  automatically after network connection. Resume requires a fresh contact proof and a matching member
   token; removal revokes both membership and the token. See private-group-security.md.
 - PublicGroupDiscovery registers app-specific DNS-SD records. Public records may
   name the host; private version-4 records carry only a random per-group label,

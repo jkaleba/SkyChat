@@ -25,7 +25,7 @@ The [Windows-to-TestFlight guide](docs/ios-github-actions.md) covers GitHub Acti
 Windows certificate generation, signing secrets and installing on iPhone.
 
 Private groups now use one-time NFC contact verification, anonymous nearby group
-labels, explicit host approval and contact-authenticated TLS 1.3, including resume
+labels, automatic verified-contact admission and contact-authenticated TLS 1.3, including resume
 tokens. Both phones need this build. Group text is encrypted to the host, which
 forwards messages; physical-phone acceptance remains pending. See
 [private group security](docs/private-group-security.md).

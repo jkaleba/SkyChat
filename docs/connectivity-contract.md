@@ -2,7 +2,7 @@
 
 Current private-group changes are specified in [private group security](private-group-security.md).
 `createGroup` accepts private creation without an admission token; the app uses
-verified contacts plus host approval. Private DNS-SD records use `v=4`, `mode=private`
+automatic verified-contact admission. Private DNS-SD records use `v=4`, `mode=private`
 and a random `sid`, with no username, `cid` or credentials. Public records remain
 `v=3`. Private NFC admission-token descriptions below are retained as a historical
 bridge schema, not the current private join flow. Private chat has no plaintext fallback.
@@ -17,7 +17,7 @@ Codec: Flutter StandardMethodCodec.
 | --- | --- | --- |
 | getCapabilities | none | platform, wifiDirectSupported, implementationReady, description |
 | getState | none | Cached snapshot; also schedules a system refresh emitted as events |
-| createGroup | {privateGroup: bool, admissionToken?: string} | null when Android accepts creation; current private groups use contact authentication and host approval; optional token is the legacy NFC schema |
+| createGroup | {privateGroup: bool, admissionToken?: string} | null when Android accepts creation; current private groups use contact authentication and automatic admission; optional token is the legacy NFC schema |
 | discoverPeers | none | null when Android accepts DNS-SD discovery; public v3 records and anonymous private v4 records |
 | joinGroup | {peerId: string} | null when Android accepts connection to a discovered peer |
 | disconnect | none | null after discovery/negotiation cleanup and group removal |
@@ -25,7 +25,7 @@ Codec: Flutter StandardMethodCodec.
 | getInvitation | none | Public host QR invitation; private hosts return private_group |
 | joinInvitation | invitation map | null when Android accepts credential-based joining (API 29+) |
 | startNfcSharing | none | null after current host credentials are fetched and HCE sharing enabled for up to 60 seconds |
-| startIosNfcSharing | none | Additional Android-host action: HCE sharing with actual hostAddress; private version 3 has no admission token and requires contact authentication plus host approval |
+| startIosNfcSharing | none | Additional Android-host action: HCE sharing with actual hostAddress; private version 3 has no admission token and requires contact authentication plus automatic verified-contact admission |
 | readNfcInvitation | none | Invitation JSON string after one successful ISO-DEP read; does not join |
 | stopNfc | none | null after sharing is revoked and pending reading cancelled |
 

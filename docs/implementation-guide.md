@@ -3,7 +3,7 @@
 SkyChat is an offline Android group messenger with a Flutter interface. Android
 creates a local Wi-Fi Direct network, and Dart sockets carry chat traffic through
 the phone hosting that network. NFC establishes trusted contacts. Private chat
-then authenticates those contacts over TLS and asks the host to approve admission.
+then authenticates those contacts over TLS and admits verified contacts automatically.
 Voice calls use WebRTC over the same local network.
 
 This describes the implementation as of 2026-11-24. Start with the
@@ -15,7 +15,7 @@ This describes the implementation as of 2026-11-24. Start with the
 - [What happens when phones touch to verify contacts](#what-happens-when-phones-touch-to-verify-contacts)
 - [Creating and discovering a Wi-Fi Direct group](#creating-and-discovering-a-wi-fi-direct-group)
 - [Group credentials over QR or the retained NFC invitation flow](#group-credentials-over-qr-or-the-retained-nfc-invitation-flow)
-- [Private chat authentication and host approval](#private-chat-authentication-and-host-approval)
+- [Private chat authentication and automatic admission](#private-chat-authentication-and-automatic-admission)
 - [Chat setup and message delivery](#chat-setup-and-message-delivery)
 - [Disconnection and recovery](#disconnection-and-recovery)
 - [Voice calls on the existing network](#voice-calls-on-the-existing-network)
@@ -122,7 +122,7 @@ does not thereby become a Wi-Fi Direct host.
 The current Groups UI uses nearby discovery or public QR invitations. Some older
 documents and strings describe private groups as NFC-invitation-only. Current
 private groups instead use NFC contact verification once, then anonymous discovery,
-TLS contact authentication and host approval. The legacy invitation schema does
+TLS contact authentication and automatic admission. The legacy invitation schema does
 not replace those checks.
 
 ## What happens when phones touch to verify contacts
@@ -375,7 +375,7 @@ private invitations.
 Legacy private invitations use schema version 2 with `privateGroup: true` and a
 64-character lowercase hexadecimal `admissionToken`. Those fields remain in
 bridge models and tests. Current private group creation sets no admission token
-and uses contact authentication and approval instead. Do not implement a new
+and uses automatic admission after contact authentication instead. Do not implement a new
 private join path by treating this legacy token as sufficient authority.
 
 Invitation sharing is explicit, temporary and available only while unlocked.
@@ -383,7 +383,7 @@ Stopping sharing removes the in-memory NFC payload but does not revoke Wi-Fi
 credentials already read. The group invitation protocol has no signed contact
 proof, one-time credential guarantee or persistent trust enrollment.
 
-## Private chat authentication and host approval
+## Private chat authentication and automatic admission
 
 Private group creation sets `requireVerifiedContact` on the host, and private
 joining sets `requireContactAuth` on the client. The host creates an ephemeral
@@ -395,7 +395,6 @@ separate from the persistent identity key, which never leaves Keystore.
 sequenceDiagram
     participant C as Private group client
     participant H as Group host
-    actor U as Host user
     C->>H: Connect to actual P2P address on TCP 45871
     C->>H: TLS 1.3 handshake with ephemeral certificate
     Note over C,H: Following frames are carried inside TLS
@@ -404,12 +403,7 @@ sequenceDiagram
     Note over C: Verify NFC-pinned host key and exact TLS certificate
     C->>H: hello with client proof and optional resume credentials
     Note over H: Verify saved client contact and bound proof
-    alt First admission to this live group
-        H-->>C: approval_pending
-        U->>H: Approve join
-    else Approved contact or valid authenticated resume
-        Note over H: Check current approval and token binding
-    end
+    Note over H: Reject blocked/unknown/removed contacts; check resume token binding
     H-->>C: welcome with participant identity and resume token
     H-->>C: roster
     H-->>C: Retained missed messages on resume
@@ -431,11 +425,12 @@ The client pins the verified host for later resumes of that conversation. The
 host independently verifies the client's proof and looks up the saved contact
 name. Discovery labels are never used as authentication.
 
-For first admission, `approval_pending` exposes no roster, chat history or resume
-token. The host chooses **Approve join** or **Decline join** in Home or Chat.
-Requests expire after 60 seconds. Approval is for this contact in this live group;
-a newly hosted chat starts with no approvals. Resume requires both a fresh
-contact proof and a valid token belonging to the same contact and group.
+After successful proof and a current verified-contact lookup, admission is
+automatic. The Android network invitation remains the host's manual join action.
+No roster, history or resume token is sent before contact authentication. Resume
+requires a fresh proof and a token belonging to that same contact and group.
+Updated clients still understand `approval_pending` from older hosts and show
+a compatibility notice; updated hosts never emit it or request a second approval.
 
 Private frames remain inside TLS, including messages, names, membership decisions,
 receipts, resume tokens and call signaling. There is no plaintext fallback.
@@ -444,10 +439,12 @@ group text. This does not provide group end-to-end encryption between clients.
 Public chat uses plaintext TCP, with self-reported names and contact IDs; those
 IDs alone do not authenticate a public participant.
 
-Removing a private member revokes its application identity, approval and resume
-credentials and closes its chat connection. It does not remove that phone from
-the Wi-Fi network. A later fresh admission needs host approval again. A blocked
-or deleted contact cannot pass the contact verifier on a new connection.
+Removing a private member revokes its application identity and resume
+credentials and closes its chat connection. Its verified contact is denied for
+the rest of this hosted group, including fresh sessions without a resume token.
+A newly hosted group resets that group-specific exclusion. Blocking or deleting
+a contact prevents authentication in subsequent groups too. Removal does not
+remove the phone from the Wi-Fi network.
 See [private group security](private-group-security.md) for the security boundary
 and acceptance scenarios.
 
@@ -525,7 +522,7 @@ delivery state. When the cursor predates retained history, `gap: true` warns tha
 some messages are unavailable. Uncertain sends retain their original IDs and
 require explicit retry; reconnecting does not silently resend drafts.
 
-If the host restarts, its previous group ID, approvals and tokens are gone. A
+If the host restarts, its previous group ID, exclusions and tokens are gone. A
 changed host session ends the old conversation. Starting a new chat explicitly
 clears the live history, draft and outbox while Android's saved archives remain
 available separately. Changing Wi-Fi ownership does not migrate chat.
@@ -538,11 +535,10 @@ available separately. Changing Wi-Fi ownership does not migrate chat.
 | Public TCP connect | Up to five attempts, two-second connect timeout and 500 ms between failures. |
 | Private TLS client connect | Up to five attempts, four-second connect timeout and 500 ms between failures. |
 | Host TLS handshake | Five-second timeout. |
-| Unadmitted socket handshake | Eight seconds, excluding a registered pending admission. |
-| Client initial synchronization | 12 seconds, excluding waiting for host approval. |
+| Unadmitted socket handshake | Eight seconds to finish contact authentication and admission. |
+| Client initial synchronization | 12 seconds; older approval-based hosts retain their compatibility wait. |
 | Host message confirmation | Six seconds by default. |
 | Heartbeat and dead socket | Ping every 10 seconds; 35 seconds without incoming bytes closes the socket. |
-| Private host approval | 60 seconds. |
 | Connected participants | Up to 15 client sockets plus the host; actual radio capacity can be lower. |
 | Issued resume identities | Up to 128 per hosted session. |
 | History for replay | Last 500 accepted text messages. |
@@ -613,7 +609,7 @@ Physical-device lifecycle and radio behavior require separate acceptance testing
 | Wi-Fi invitation payload | Process memory during explicit sharing/reading; not written by the invitation implementation. |
 | Saved chat messages, drafts and delivery-check snapshots | Android Keystore-encrypted `noBackupFilesDir/chat-history-v1.enc`; bounded local archives survive process restart. See [saved conversations](chat-history.md). |
 | Live outbox requests, ordering counters, resume tokens and host replay state | Process memory for the current conversation; archives do not resume or resend these requests. |
-| Private group approvals and pending requests | Host process memory for the current live group. |
+| Private group contact exclusions | Host process memory for the current live group. |
 | Private TLS key and certificate | Host process memory for the current hosted chat. |
 | Voice | Live media; the app has no audio recording path. |
 

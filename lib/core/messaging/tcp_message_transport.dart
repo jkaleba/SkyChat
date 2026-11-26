@@ -21,21 +21,6 @@ class _Identity {
   bool revoked = false;
 }
 
-class PrivateJoinRequest {
-  const PrivateJoinRequest(this.id, this.contactId, this.name);
-  final String id;
-  final String contactId;
-  final String name;
-}
-
-class _PendingAdmission {
-  _PendingAdmission(this.request, this.frame, this.after);
-  final PrivateJoinRequest request;
-  final Map<String, dynamic> frame;
-  final int after;
-  Timer? timeout;
-}
-
 /// Foreground, in-memory protocol v3. Resume tokens are NOT authenticated identity.
 class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   TcpMessageTransport({
@@ -58,14 +43,11 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   bool _waitingForApproval = false;
   final _handshaking = <Socket>{};
   final _authenticating = <Socket>{};
-  final _admissions = <Socket, _PendingAdmission>{};
-  final _approvedContacts = <String>{};
+  final _removedContacts = <String>{};
   bool get waitingForApproval => _waitingForApproval;
   bool get privateChannelAuthenticated =>
       (requireVerifiedContact && _privateContext != null) ||
       (requireContactAuth && _authenticatedPrivateHost);
-  List<PrivateJoinRequest> get joinRequests =>
-      List.unmodifiable(_admissions.values.map((p) => p.request));
   final bool callCapable;
   bool _callRelay = false;
   String? hostId;
@@ -178,7 +160,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     _selfContactId = null;
     _hostContactId = null;
     _pinnedHostContactId = null;
-    _approvedContacts.clear();
+    _removedContacts.clear();
     _sequence = 0;
     _nextRequest = 0;
     sessionEnded = false;
@@ -295,8 +277,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
     Future<void>.delayed(const Duration(seconds: 8), () {
       if (epoch == _epoch &&
           _peers.containsKey(socket) &&
-          _peers[socket] == null &&
-          !_admissions.containsKey(socket)) {
+          _peers[socket] == null) {
         _lost(socket);
       }
     });
@@ -894,34 +875,24 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
               )
               .single;
           if (epoch != _epoch || !_peers.containsKey(socket)) return;
-          // Authentication is required on every reconnect, including token resume.
-          if (resume || _approvedContacts.contains(verified)) {
-            _completeHello(
+          // The network invitation is the host's only manual join decision.
+          // Every socket must still prove a currently verified NFC identity.
+          if (_removedContacts.contains(verified)) {
+            _rejectSession(
               socket,
-              frame,
-              contact.name,
-              after,
-              resume,
-              verifiedContactId: verified,
+              'The host removed you from this private group.',
+              code: 'revoked',
             );
-          } else {
-            final pending = _PendingAdmission(
-              PrivateJoinRequest(_id(), verified, contact.name),
-              frame,
-              after,
-            );
-            _admissions[socket] = pending;
-            pending.timeout = Timer(const Duration(seconds: 60), () {
-              if (epoch == _epoch && identical(_admissions[socket], pending)) {
-                _rejectSession(
-                  socket,
-                  'The host did not approve your request. Try joining again.',
-                );
-              }
-            });
-            _write(socket, {'type': 'approval_pending'});
-            _notify();
+            return;
           }
+          _completeHello(
+            socket,
+            frame,
+            contact.name,
+            after,
+            resume,
+            verifiedContactId: verified,
+          );
         } catch (_) {
           if (epoch == _epoch && _peers.containsKey(socket)) {
             _rejectSession(
@@ -936,58 +907,6 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       return;
     }
     _completeHello(socket, frame, name, after, resume);
-  }
-
-  /// Approvals belong to this live group and this verified contact only.
-  Future<void> approveJoin(String requestId) async {
-    if (!_isHost || !requireVerifiedContact || sessionEnded) return;
-    final entry = _admissions.entries
-        .where((e) => e.value.request.id == requestId)
-        .firstOrNull;
-    if (entry == null) return;
-    final epoch = _epoch;
-    final pending = entry.value;
-    try {
-      final snapshot = await _contacts.load().timeout(
-        const Duration(seconds: 4),
-      );
-      if (epoch != _epoch || !identical(_admissions[entry.key], pending)) {
-        return;
-      }
-      final contact = snapshot.contacts
-          .where(
-            (c) =>
-                c.id == pending.request.contactId &&
-                c.trust == ContactTrust.verified,
-          )
-          .single;
-      _admissions.remove(entry.key);
-      pending.timeout?.cancel();
-      _approvedContacts.add(contact.id);
-      _completeHello(
-        entry.key,
-        pending.frame,
-        contact.name,
-        pending.after,
-        false,
-        verifiedContactId: contact.id,
-      );
-      _notify();
-    } catch (_) {
-      if (epoch == _epoch && identical(_admissions[entry.key], pending)) {
-        _rejectSession(entry.key, 'This contact is no longer verified.');
-      }
-    }
-  }
-
-  void rejectJoin(String requestId) {
-    if (!_isHost) return;
-    final entry = _admissions.entries
-        .where((e) => e.value.request.id == requestId)
-        .firstOrNull;
-    if (entry != null) {
-      _rejectSession(entry.key, 'The host declined your request to join.');
-    }
   }
 
   void _completeHello(
@@ -1009,8 +928,7 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       final existing = _identities[token];
       if (requireVerifiedContact &&
           (existing == null ||
-              existing.participant.contactId != verifiedContactId ||
-              !_approvedContacts.contains(verifiedContactId))) {
+              existing.participant.contactId != verifiedContactId)) {
         _rejectSession(
           socket,
           'Your membership in this private group is no longer valid.',
@@ -1149,15 +1067,10 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       (i) => i.participant.id == participantId,
     );
     identity.revoked = true;
-    _approvedContacts.remove(identity.participant.contactId);
-    for (final entry in _admissions.entries.toList()) {
-      if (entry.value.request.contactId == identity.participant.contactId) {
-        _rejectSession(
-          entry.key,
-          'The host removed you from this private group.',
-          code: 'revoked',
-        );
-      }
+    final contactId = identity.participant.contactId;
+    if (requireVerifiedContact && contactId != null) {
+      // A fresh session or reset resume token cannot undo removal from this group.
+      _removedContacts.add(contactId);
     }
     for (final entry in _peers.entries.toList()) {
       if (identical(entry.value, identity)) {
@@ -1440,7 +1353,6 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
   }
 
   void _clearPendingPeer(Socket socket) {
-    _admissions.remove(socket)?.timeout?.cancel();
     _challenges.remove(socket);
     _authenticating.remove(socket);
   }
@@ -1485,10 +1397,6 @@ class TcpMessageTransport extends ChangeNotifier implements MessageTransport {
       socket.destroy();
     }
     _handshaking.clear();
-    for (final pending in _admissions.values) {
-      pending.timeout?.cancel();
-    }
-    _admissions.clear();
     _challenges.clear();
     _authenticating.clear();
     for (final socket in _peers.keys) {

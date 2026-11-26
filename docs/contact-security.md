@@ -5,7 +5,7 @@ cryptographic formats, not an independently audited security claim. C2 adds trus
 contacts; it does not encrypt existing chat or grant group membership.
 
 The C2 milestone below is historical. The later [private group channel](private-group-security.md)
-uses these NFC-pinned identities to authenticate TLS 1.3 and requires host approval
+uses these NFC-pinned identities to authenticate TLS 1.3 and automatically admits verified contacts
 for each live group. Contact pairing alone still grants no membership.
 
 ## Cryptography and identity

@@ -5,7 +5,7 @@ Saved conversations remain available below those actions. The home screen does
 not start discovery, open the camera or read NFC automatically.
 
 Create opens the public/private choice. Public is still the default; choosing
-Private keeps the existing verified-contact and host-approval requirements.
+Private keeps the existing verified-contact requirements.
 The choices wrap on narrow screens and with large text. Connection permissions
 are requested by Android when the user starts the relevant operation.
 
@@ -29,8 +29,8 @@ explicit show/hide controls and disappear on disconnect, including when a late
 native response arrives. Host teardown still requires confirmation.
 
 Connection status, host sharing, saved conversations, recent chat and nearby
-results use shared builders across the relevant screens. Native Android
-discovery, connection, encryption and admission code is unchanged. A synchronous
+results use shared builders across the relevant screens. Native Android discovery and connection setup remain unchanged; private chat
+admission automatically follows successful contact authentication. A synchronous
 operation guard ignores a second tap while a native request is pending and
 still allows cancellation before the native reply arrives. The
 existing iOS prototype entry flow remains available.

@@ -1,7 +1,7 @@
 # Public and private groups
 
 Current private groups use NFC-verified contacts, anonymous per-group discovery,
-explicit host approval and TLS 1.3. See [private group security](private-group-security.md)
+automatic verified-contact admission and TLS 1.3. See [private group security](private-group-security.md)
 for the current join flow, protocol and validation. Public groups retain discovery,
 QR/NFC joining and the existing public chat protocol.
 

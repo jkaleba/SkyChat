@@ -3,47 +3,34 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:offline_group_messenger/core/messaging/tcp_message_transport.dart';
 import 'package:offline_group_messenger/features/chat/private_membership_panel.dart';
 
-class _Requests extends TcpMessageTransport {
-  final requests = <PrivateJoinRequest>[
-    const PrivateJoinRequest('request', 'alice', 'Alice'),
-  ];
-  String? approved;
-  String? declined;
+class _LegacyHost extends TcpMessageTransport {
+  bool waiting = false;
   @override
-  List<PrivateJoinRequest> get joinRequests => requests;
-  @override
-  Future<void> approveJoin(String id) async {
-    approved = id;
-    requests.clear();
-    notifyListeners();
-  }
-
-  @override
-  void rejectJoin(String id) {
-    declined = id;
-    requests.clear();
-    notifyListeners();
-  }
+  bool get waitingForApproval => waiting;
 }
 
 void main() {
-  for (final approve in [true, false]) {
-    testWidgets(
-      'host can ${approve ? 'approve' : 'decline'} a named join request',
-      (tester) async {
-        final transport = _Requests();
-        addTearDown(transport.dispose);
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(body: PrivateMembershipPanel(transport: transport)),
-          ),
-        );
-        expect(find.text('Alice wants to join'), findsOneWidget);
-        await tester.tap(find.text(approve ? 'Approve join' : 'Decline join'));
-        await tester.pumpAndSettle();
-        expect(approve ? transport.approved : transport.declined, 'request');
-        expect(find.text('Alice wants to join'), findsNothing);
-      },
+  testWidgets('updated hosts never show a second membership decision', (
+    tester,
+  ) async {
+    final transport = _LegacyHost();
+    addTearDown(transport.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: PrivateMembershipPanel(transport: transport)),
+      ),
     );
-  }
+    expect(find.byType(ListTile), findsNothing);
+    expect(find.text('Approve join'), findsNothing);
+    expect(find.text('Decline join'), findsNothing);
+    transport.waiting = true;
+    transport.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.text('Waiting for a host with an older app'), findsOneWidget);
+    expect(find.byType(FilledButton), findsNothing);
+    transport.waiting = false;
+    transport.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.byType(ListTile), findsNothing);
+  });
 }

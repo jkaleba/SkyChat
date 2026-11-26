@@ -66,14 +66,32 @@ class _PrivatePeer {
   }
 }
 
+class GatedPrivateContacts extends PrivateContacts {
+  GatedPrivateContacts(super.identity, super.trusted);
+  Completer<void>? verificationGate;
+  bool verifying = false;
+  @override
+  Future<String> verifyPrivateChannel(
+    String token,
+    Map<String, dynamic> expected,
+  ) async {
+    verifying = true;
+    await verificationGate?.future;
+    return super.verifyPrivateChannel(token, expected);
+  }
+}
+
 void main() {
-  late PrivateContacts hostContacts;
+  late GatedPrivateContacts hostContacts;
   late PrivateContacts aliceContacts;
   late TcpMessageTransport host;
   late TcpMessageTransport alice;
   final extraPeers = <_PrivatePeer>[];
   setUp(() async {
-    hostContacts = PrivateContacts('host', {'alice': 'Alice', 'bob': 'Bob'});
+    hostContacts = GatedPrivateContacts('host', {
+      'alice': 'Alice',
+      'bob': 'Bob',
+    });
     aliceContacts = PrivateContacts('alice', {'host': 'Host'});
     host = TcpMessageTransport(contacts: hostContacts)
       ..requireVerifiedContact = true;
@@ -97,11 +115,10 @@ void main() {
   });
   Future<void> connect() =>
       alice.connect(host: '127.0.0.1', port: host.listeningPort!);
-  Future<void> approve() async {
-    await until(() => host.joinRequests.isNotEmpty);
-    await host.approveJoin(host.joinRequests.single.id);
+  Future<void> ready() async {
     await until(() => alice.status == ChatStatus.ready);
     expect(alice.authenticatedHostContactId, host.authenticatedHostContactId);
+    expect(alice.waitingForApproval, isFalse);
   }
 
   Future<_PrivatePeer> peer(PrivateContacts contacts) async {
@@ -113,59 +130,85 @@ void main() {
   }
 
   test(
-    'verified contact receives no chat or roster until this host approves',
+    'verified contact joins automatically after proof, with no pre-authentication data',
     () async {
+      hostContacts.verificationGate = Completer<void>();
       await connect();
-      await until(() => alice.waitingForApproval);
-      expect(host.joinRequests.single.name, 'Alice');
+      await until(() => hostContacts.verifying);
       expect(alice.selfId, isNull);
       expect(alice.participants, isEmpty);
-      await host.sendText('Before approval');
+      expect(alice.waitingForApproval, isFalse);
+      await host.sendText('Before verification');
       expect(alice.messages, isEmpty);
-      await approve();
+      hostContacts.verificationGate!.complete();
+      await ready();
       expect(alice.privateChannelAuthenticated, isTrue);
-      expect(host.joinRequests, isEmpty);
       expect(texts(alice), isEmpty);
+      expect(
+        host.participants
+            .singleWhere((p) => p.contactId == 'alice')
+            .displayName,
+        'Alice',
+      );
       await alice.sendText('Encrypted message');
       expect(texts(host).last.text, 'Encrypted message');
     },
   );
 
   test(
-    'decline exposes no conversation and a new group requires fresh approval',
+    'an unknown client receives no conversation, while verified contacts join a new group automatically',
     () async {
+      hostContacts.trusted.remove('alice');
       await connect();
-      await until(() => host.joinRequests.isNotEmpty);
-      host.rejectJoin(host.joinRequests.single.id);
       await until(() => alice.sessionEnded);
       expect(alice.messages, isEmpty);
       expect(alice.participants, isEmpty);
-      expect(alice.error, contains('declined'));
+      expect(host.participants.length, 1);
+      hostContacts.trusted['alice'] = 'Alice';
       alice.resetSession();
       await connect();
-      await approve();
+      await ready();
       await alice.close();
       await host.startHost(port: 0, address: '127.0.0.1');
       alice.resetSession();
       await connect();
-      await until(() => alice.waitingForApproval);
-      expect(alice.status, ChatStatus.connecting);
-      expect(host.participants.length, 1);
+      await ready();
+      expect(host.participants.length, 2);
     },
   );
 
   test(
-    'approved resume preserves identity and removal revokes its grant',
+    'removing a contact denies fresh sessions until this hosted group ends',
     () async {
       await connect();
-      await approve();
+      await ready();
+      host.removePrivateMember(alice.selfId!);
+      await until(() => alice.sessionEnded);
+      alice.resetSession();
+      await connect();
+      await until(() => alice.sessionEnded);
+      expect(alice.membershipRevoked, isTrue);
+      expect(alice.participants, isEmpty);
+      expect(host.participants.length, 1);
+      await host.startHost(port: 0, address: '127.0.0.1');
+      alice.resetSession();
+      await connect();
+      await ready();
+      expect(host.participants.length, 2);
+    },
+  );
+
+  test(
+    'authenticated resume preserves identity and removal revokes access',
+    () async {
+      await connect();
+      await ready();
       final identity = alice.selfId;
       await alice.close();
       await host.sendText('While away');
       await connect();
       await until(() => alice.status == ChatStatus.ready);
       expect(alice.selfId, identity);
-      expect(host.joinRequests, isEmpty);
       expect(texts(alice).last.text, 'While away');
       expect(aliceContacts.clientProofs, 2);
       await alice.close();
@@ -173,7 +216,6 @@ void main() {
       await connect();
       await until(() => alice.sessionEnded);
       expect(alice.membershipRevoked, isTrue);
-      expect(host.joinRequests, isEmpty);
     },
   );
 
@@ -182,7 +224,7 @@ void main() {
       'fresh contact session sends immediately after rejoin (expired=$expireAcceptedMessages)',
       () async {
         await connect();
-        await approve();
+        await ready();
         await alice.sendText('Before leaving one');
         await alice.sendText('Before leaving two');
         final identity = alice.selfId;
@@ -198,7 +240,6 @@ void main() {
         await connect();
         await until(() => alice.status == ChatStatus.ready);
         expect(alice.selfId, identity);
-        expect(host.joinRequests, isEmpty);
         await alice.sendText('First new message');
         await alice.sendText('Second new message');
         expect(
@@ -225,10 +266,10 @@ void main() {
   }
 
   test(
-    'a new host group requires an explicit new conversation and approval',
+    'a new host group requires an explicit new conversation before automatic admission',
     () async {
       await connect();
-      await approve();
+      await ready();
       await alice.sendText('Old group message');
       final oldGroup = alice.groupId;
       await alice.close();
@@ -236,12 +277,10 @@ void main() {
       await connect();
       await until(() => alice.sessionEnded);
       expect(alice.error, contains('host session changed'));
-      expect(host.joinRequests, isEmpty);
       expect(host.participants.length, 1);
       alice.resetSession();
       await connect();
-      await until(() => alice.waitingForApproval);
-      await approve();
+      await ready();
       expect(alice.groupId, isNot(oldGroup));
       expect(texts(alice), isEmpty);
       await alice.sendText('First message in the new group');
@@ -253,12 +292,11 @@ void main() {
     'blocked contact cannot resume using its previously valid token',
     () async {
       await connect();
-      await approve();
+      await ready();
       await alice.close();
       hostContacts.blocked.add('alice');
       await connect();
       await until(() => alice.sessionEnded);
-      expect(host.joinRequests, isEmpty);
       expect(alice.status, ChatStatus.offline);
     },
   );
@@ -271,7 +309,6 @@ void main() {
       await until(() => alice.status == ChatStatus.offline);
       expect(aliceContacts.clientProofs, 0);
       expect(alice.error, contains('verify this private group'));
-      expect(host.joinRequests, isEmpty);
     },
   );
 
@@ -280,21 +317,15 @@ void main() {
     await connect();
     await until(() => alice.status == ChatStatus.offline);
     expect(aliceContacts.clientProofs, 0);
-    expect(host.joinRequests, isEmpty);
   });
 
-  test('another approved contact cannot use a stolen resume token', () async {
+  test('another verified contact cannot use a stolen resume token', () async {
     final a = await peer(aliceContacts);
     await a.hello(aliceContacts);
-    await until(() => host.joinRequests.isNotEmpty);
-    expect(host.joinRequests.single.name, 'Alice');
-    await host.approveJoin(host.joinRequests.single.id);
     final welcome = await a.next('welcome');
     final bobContacts = PrivateContacts('bob', {'host': 'Host'});
     final b = await peer(bobContacts);
     await b.hello(bobContacts);
-    await until(() => host.joinRequests.isNotEmpty);
-    await host.approveJoin(host.joinRequests.single.id);
     await b.next('welcome');
     b.close();
     final impostor = await peer(bobContacts);
@@ -319,9 +350,8 @@ void main() {
     raw.destroy();
     expect(host.status, ChatStatus.ready);
     expect(host.participants.length, 1);
-    expect(host.joinRequests, isEmpty);
     await connect();
-    await approve();
+    await ready();
   });
 
   test('a wire observer cannot read messages or resume credentials', () async {
@@ -359,8 +389,6 @@ void main() {
     );
     extraPeers.add(endpoint);
     await endpoint.hello(aliceContacts);
-    await until(() => host.joinRequests.isNotEmpty);
-    await host.approveJoin(host.joinRequests.single.id);
     final welcome = await endpoint.next('welcome');
     const message = 'This message must never be visible on the wire';
     endpoint.send({'type': 'send', 'id': '1', 'text': message});
